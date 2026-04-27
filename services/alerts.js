@@ -1,4 +1,3 @@
-// alerts.js
 const axios = require('axios');
 
 async function sendAlert(subject, message) {
