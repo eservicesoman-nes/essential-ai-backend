@@ -1,4 +1,3 @@
-// server.js  —  Essential AI Backend v2
 require('dotenv').config();
 
 const express   = require('express');
@@ -29,7 +28,6 @@ app.set('trust proxy', 1);
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// ✅ CORS — accept all origins
 app.use(cors({
   origin: function(origin, callback) { callback(null, true); },
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -67,14 +65,14 @@ app.post('/api/chat', requireAuth, async (req, res) => {
   if (!message || typeof message !== 'string' || !message.trim())
     return res.status(400).json({ error: 'Message is required.' });
   if (message.length > 8000)
-    return res.status(400).json({ error: 'Message too long (max 8000 characters).' });
+    return res.status(400).json({ error: 'Message too long.' });
   const VALID_MODES = ['chat', 'deepcore', 'docs', 'image'];
   if (!VALID_MODES.includes(mode))
-    return res.status(400).json({ error: `Invalid mode.` });
+    return res.status(400).json({ error: 'Invalid mode.' });
 
   const usageCheck = await checkUsageAllowed(userId, 'chats');
   if (!usageCheck.allowed)
-    return res.status(429).json({ error: `Daily limit reached. Resets at midnight.` });
+    return res.status(429).json({ error: 'Daily limit reached. Resets at midnight.' });
 
   const cleanHistory = Array.isArray(history)
     ? history.slice(-10).map(h => ({
@@ -94,7 +92,8 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     ]).catch(err => console.warn('Post-response DB ops failed:', err.message));
 
     return res.json({
-      reply: result.reply, model: result.model,
+      reply: result.reply,
+      model: result.model,
       fallbackUsed: result.fallbackUsed,
       sources: result.sources || [],
       remaining: usageCheck.remaining - 1
@@ -117,7 +116,7 @@ app.post('/api/image', requireAuth, async (req, res) => {
 
   const usageCheck = await checkUsageAllowed(userId, 'images');
   if (!usageCheck.allowed)
-    return res.status(429).json({ error: `Daily image limit reached.` });
+    return res.status(429).json({ error: 'Daily image limit reached.' });
 
   try {
     const result = await addToQueue(() => generateImage(prompt.trim(), size, quality));
