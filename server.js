@@ -6,15 +6,13 @@ const cors      = require('cors');
 const helmet    = require('helmet');
 const rateLimit = require('express-rate-limit');
 
-const { requireAuth }                                     = require('./services/auth');
-const { routeMessage }                                    = require('./services/router');
-const { generateImage }                                   = require('./services/image');
-const { addToQueue, getQueueStats }                       = require('./services/queue');
-const { checkUsageAllowed, incrementUsage,
-        getTodayUsage, logRequest }                       = require('./services/database');
-const { sendAlert }                                       = require('./services/alerts');
+const { requireAuth }          = require('./services/auth');
+const { routeMessage }         = require('./services/router');
+const { generateImage }        = require('./services/image');
+const { addToQueue, getQueueStats } = require('./services/queue');
+const { checkUsageAllowed, incrementUsage, getTodayUsage, logRequest } = require('./services/database');
+const { sendAlert }            = require('./services/alerts');
 
-// ── Validate env at startup ───────────────────────────────────
 const REQUIRED_ENV = [
   'DEEPSEEK_API_KEY', 'CLAUDE_API_KEY', 'OPENAI_API_KEY',
   'TAVILY_API_KEY', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'
@@ -27,35 +25,31 @@ for (const key of REQUIRED_ENV) {
 }
 
 const app = express();
-
-// ============================================================
-// 🔧 FIX: Trust proxy for rate limiter behind Render proxy
-// ============================================================
 app.set('trust proxy', 1);
 
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+// ✅ CORS — accept all origins
 app.use(cors({
-  origin:         process.env.FRONTEND_URL || '*',
-  methods:        ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  origin: function(origin, callback) { callback(null, true); },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
 }));
+app.options('*', cors());
+
 app.use(express.json({ limit: '2mb' }));
 
-// IP-level rate limiter (DOS protection)
 app.use('/api/', rateLimit({
-  windowMs:       60 * 1000,
-  max:            60,
-  standardHeaders: true,
-  legacyHeaders:  false,
-  message:        { error: 'Too many requests from this IP. Please slow down.' }
+  windowMs: 60 * 1000, max: 60,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many requests from this IP.' }
 }));
 
-// ── Health ────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', queue: getQueueStats(), ts: new Date().toISOString() });
 });
 
-// ── Usage ─────────────────────────────────────────────────────
 app.get('/api/usage', requireAuth, async (req, res) => {
   try {
     const usage = await getTodayUsage(req.userId);
@@ -66,114 +60,84 @@ app.get('/api/usage', requireAuth, async (req, res) => {
   }
 });
 
-// ── Chat ──────────────────────────────────────────────────────
 app.post('/api/chat', requireAuth, async (req, res) => {
   const { message, mode = 'chat', webSearch = false, history = [] } = req.body;
   const userId = req.userId;
 
-  // Validate input
-  if (!message || typeof message !== 'string' || !message.trim()) {
+  if (!message || typeof message !== 'string' || !message.trim())
     return res.status(400).json({ error: 'Message is required.' });
-  }
-  if (message.length > 8000) {
+  if (message.length > 8000)
     return res.status(400).json({ error: 'Message too long (max 8000 characters).' });
-  }
   const VALID_MODES = ['chat', 'deepcore', 'docs', 'image'];
-  if (!VALID_MODES.includes(mode)) {
-    return res.status(400).json({ error: `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}` });
-  }
+  if (!VALID_MODES.includes(mode))
+    return res.status(400).json({ error: `Invalid mode.` });
 
-  // Enforce daily chat limit
   const usageCheck = await checkUsageAllowed(userId, 'chats');
-  if (!usageCheck.allowed) {
-    return res.status(429).json({
-      error: `Daily limit reached (${usageCheck.limit} messages/day on ${usageCheck.tier} tier). Resets at midnight.`
-    });
-  }
+  if (!usageCheck.allowed)
+    return res.status(429).json({ error: `Daily limit reached. Resets at midnight.` });
 
-  // Sanitise history from client
   const cleanHistory = Array.isArray(history)
     ? history.slice(-10).map(h => ({
-        role:    h.role === 'assistant' ? 'assistant' : 'user',
+        role: h.role === 'assistant' ? 'assistant' : 'user',
         content: String(h.content || '').slice(0, 2000)
-      }))
-    : [];
+      })) : [];
 
-  // Only allow web search in chat and deepcore modes
   const searchEnabled = webSearch && ['chat', 'deepcore'].includes(mode);
 
   try {
     const result = await addToQueue(() =>
       routeMessage(message.trim(), cleanHistory, mode, searchEnabled)
     );
-
-    // Non-blocking post-response tasks
     Promise.all([
       incrementUsage(userId, 'chats'),
       logRequest(userId, mode, result.model, searchEnabled, result.fallbackUsed)
     ]).catch(err => console.warn('Post-response DB ops failed:', err.message));
 
     return res.json({
-      reply:        result.reply,
-      model:        result.model,
+      reply: result.reply, model: result.model,
       fallbackUsed: result.fallbackUsed,
-      sources:      result.sources || [],
-      remaining:    usageCheck.remaining - 1
+      sources: result.sources || [],
+      remaining: usageCheck.remaining - 1
     });
-
   } catch (err) {
     console.error(`/api/chat error for ${userId}:`, err.message);
     await sendAlert('Chat endpoint error', `User: ${userId}\n${err.message}`);
-    return res.status(503).json({ error: 'AI service temporarily unavailable. Please try again.' });
+    return res.status(503).json({ error: 'AI service temporarily unavailable.' });
   }
 });
 
-// ── Image generation ──────────────────────────────────────────
 app.post('/api/image', requireAuth, async (req, res) => {
   const { prompt, size = '1024x1024', quality = 'standard' } = req.body;
   const userId = req.userId;
 
-  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim())
     return res.status(400).json({ error: 'Prompt is required.' });
-  }
-  if (prompt.length > 4000) {
-    return res.status(400).json({ error: 'Prompt too long (max 4000 characters).' });
-  }
-  const VALID_SIZES = ['1024x1024', '1792x1024', '1024x1792'];
-  if (!VALID_SIZES.includes(size)) {
-    return res.status(400).json({ error: `Invalid size. Must be one of: ${VALID_SIZES.join(', ')}` });
-  }
+  if (prompt.length > 4000)
+    return res.status(400).json({ error: 'Prompt too long.' });
 
-  // Enforce daily image limit
   const usageCheck = await checkUsageAllowed(userId, 'images');
-  if (!usageCheck.allowed) {
-    return res.status(429).json({
-      error: `Daily image limit reached (${usageCheck.limit} images/day on ${usageCheck.tier} tier). Resets at midnight.`
-    });
-  }
+  if (!usageCheck.allowed)
+    return res.status(429).json({ error: `Daily image limit reached.` });
 
   try {
     const result = await addToQueue(() => generateImage(prompt.trim(), size, quality));
-
     Promise.all([
       incrementUsage(userId, 'images'),
       logRequest(userId, 'image', 'dall-e-3', false, false)
     ]).catch(err => console.warn('Post-image DB ops failed:', err.message));
 
     return res.json({
-      url:           result.url,
+      url: result.url,
       revisedPrompt: result.revisedPrompt,
-      remaining:     usageCheck.remaining - 1
+      remaining: usageCheck.remaining - 1
     });
-
   } catch (err) {
     console.error(`/api/image error for ${userId}:`, err.message);
     await sendAlert('Image generation error', `User: ${userId}\n${err.message}`);
-    return res.status(503).json({ error: 'Image generation temporarily unavailable. Please try again.' });
+    return res.status(503).json({ error: 'Image generation temporarily unavailable.' });
   }
 });
 
-// ── 404 / Error handlers ──────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: 'Not found.' }));
 app.use((err, req, res, next) => {
   console.error('Unhandled:', err);
