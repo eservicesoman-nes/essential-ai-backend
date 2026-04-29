@@ -1,70 +1,48 @@
-// database.js
 const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(
+const sb = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const DAILY_LIMITS = {
-  free: { chats: 50, images: 3, docs: 5 },
-  pro: { chats: 500, images: 50, docs: 100 },
-  team: { chats: 2000, images: 200, docs: 500 },
-  enterprise: { chats: 10000, images: 1000, docs: 5000 }
+const LIMITS = {
+  free:       { chats: 50,   images: 3,  docs: 5 },
+  pro:        { chats: 500,  images: 50, docs: 100 },
+  team:       { chats: 2000, images: 200,docs: 500 },
+  enterprise: { chats: 99999,images: 9999,docs:9999 }
 };
 
-async function getProfile(userId) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('id, email, tier')
-    .eq('id', userId)
-    .single();
-  if (error) throw new Error(`getProfile: ${error.message}`);
-  return data;
-}
+function today() { return new Date().toISOString().slice(0, 10); }
 
 async function getTodayUsage(userId) {
-  const today = new Date().toISOString().split('T')[0];
-  const { data, error } = await supabase
-    .from('daily_usage')
-    .select('chats, images, docs')
-    .eq('user_id', userId)
-    .eq('usage_date', today)
-    .maybeSingle();
-  if (error) throw new Error(`getTodayUsage: ${error.message}`);
+  const { data } = await sb.from('usage').select('*')
+    .eq('user_id', userId).eq('date', today()).single();
   return data || { chats: 0, images: 0, docs: 0 };
 }
 
-async function incrementUsage(userId, type) {
-  const { error } = await supabase.rpc('increment_usage', {
-    p_user_id: userId,
-    p_type: type
-  });
-  if (error) throw new Error(`incrementUsage: ${error.message}`);
-}
-
 async function checkUsageAllowed(userId, type) {
-  const profile = await getProfile(userId);
   const usage = await getTodayUsage(userId);
-  const limits = DAILY_LIMITS[profile.tier] || DAILY_LIMITS.free;
+  const tier = 'free';
+  const limit = LIMITS[tier][type];
+  const used = usage[type] || 0;
+  return { allowed: used < limit, limit, remaining: limit - used, tier };
+}
+
+async function incrementUsage(userId, type) {
+  const usage = await getTodayUsage(userId);
   const current = usage[type] || 0;
-  const limit = limits[type];
-  return {
-    allowed: current < limit,
-    current,
-    limit,
-    tier: profile.tier,
-    remaining: Math.max(0, limit - current)
-  };
+  await sb.from('usage').upsert({
+    user_id: userId, date: today(),
+    [type]: current + 1
+  }, { onConflict: 'user_id,date' });
 }
 
-async function logRequest(userId, mode, modelUsed, fallbackUsed = false) {
-  await supabase.from('request_logs').insert({
-    user_id: userId,
-    mode,
-    model_used: modelUsed,
-    fallback_used: fallbackUsed
-  }).catch(err => console.warn('Log error:', err.message));
+async function logRequest(userId, mode, model, search, fallback) {
+  await sb.from('request_logs').insert({
+    user_id: userId, mode, model,
+    web_search: search, fallback_used: fallback,
+    created_at: new Date().toISOString()
+  }).catch(() => {});
 }
 
-module.exports = { getProfile, getTodayUsage, incrementUsage, checkUsageAllowed, logRequest, DAILY_LIMITS };
+module.exports = { checkUsageAllowed, incrementUsage, getTodayUsage, logRequest };
