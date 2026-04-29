@@ -1,39 +1,22 @@
-// queue.js
-const MAX_CONCURRENT = 5;
-let activeCount = 0;
-const waitingQueue = [];
+let active = 0, waiting = 0;
+const MAX_CONCURRENT = 3;
+const queue = [];
 
 function addToQueue(fn) {
   return new Promise((resolve, reject) => {
-    const task = async () => {
-      activeCount++;
-      try {
-        const result = await fn();
-        resolve(result);
-      } catch (err) {
-        reject(err);
-      } finally {
-        activeCount--;
-        runNext();
-      }
-    };
-    if (activeCount < MAX_CONCURRENT) {
-      task();
-    } else {
-      waitingQueue.push(task);
-    }
+    queue.push({ fn, resolve, reject });
+    waiting++;
+    process();
   });
 }
 
-function runNext() {
-  if (waitingQueue.length > 0 && activeCount < MAX_CONCURRENT) {
-    const next = waitingQueue.shift();
-    next();
-  }
+function process() {
+  if (active >= MAX_CONCURRENT || queue.length === 0) return;
+  const { fn, resolve, reject } = queue.shift();
+  waiting--; active++;
+  fn().then(resolve).catch(reject).finally(() => { active--; process(); });
 }
 
-function getQueueStats() {
-  return { active: activeCount, waiting: waitingQueue.length };
-}
+function getQueueStats() { return { active, waiting }; }
 
 module.exports = { addToQueue, getQueueStats };
