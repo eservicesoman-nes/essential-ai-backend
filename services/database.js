@@ -16,7 +16,7 @@ function today() { return new Date().toISOString().slice(0, 10); }
 
 async function getTodayUsage(userId) {
   const { data } = await sb.from('usage').select('*')
-    .eq('user_id', userId).eq('date', today()).single();
+    .eq('user_id', userId).eq('date', today()).maybeSingle();
   return data || { chats: 0, images: 0, docs: 0 };
 }
 
@@ -38,11 +38,15 @@ async function incrementUsage(userId, type) {
 }
 
 async function logRequest(userId, mode, model, search, fallback) {
-  await sb.from('request_logs').insert({
-    user_id: userId, mode, model,
-    web_search: search, fallback_used: fallback,
-    created_at: new Date().toISOString()
-  }).catch(() => {});
+  try {
+    await sb.from('request_logs').insert({
+      user_id: userId, mode, model,
+      web_search: search, fallback_used: fallback,
+      created_at: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn('Failed to log request:', err.message);
+  }
 }
 
 module.exports = { checkUsageAllowed, incrementUsage, getTodayUsage, logRequest };
