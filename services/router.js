@@ -85,14 +85,16 @@ async function callClaude(message, history, context, sources) {
 
 function getSystemPrompt(mode, context = '') {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  let base = `You are Essential AI, a helpful intelligent assistant. Today's date is ${today}.`;
   
+  let base = `You are Essential AI. Today is ${today}. Answer directly, concisely, and helpfully. Never add disclaimers like "as an AI", "I don't have a real-time clock", "I cannot browse the internet", or "please note". Just give the answer.`;
+
   if (context) {
-    base += `\n\nYou have access to the following LIVE web search results. Use this information to answer the user's question with current, accurate data:\n\n${context}\n\nAlways prioritize this live data over your training knowledge when answering.`;
+    base += `\n\nUse these LIVE web search results to answer:\n${context}`;
   }
   
-  if (mode === 'deepcore') base += ' Provide deep, thorough analysis with detailed explanations.';
-  if (mode === 'docs') base += ' Help analyze, summarize, and extract insights from documents.';
+  if (mode === 'deepcore') base += ' Provide thorough, detailed analysis.';
+  if (mode === 'docs') base += ' Help analyze documents and extract insights.';
+  
   return base;
 }
 
