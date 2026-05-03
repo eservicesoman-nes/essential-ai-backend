@@ -177,10 +177,10 @@ router.post('/chat', authenticate, async (req, res) => {
     let sources = [];
     
     // ✅ GEMINI PRIORITY - Check if Gemini was selected
-    if (model === 'gemini-2.0-flash') {
+    if (model === 'gemini-1.5-flash-latest') {
       console.log('🌊 Using Gemini 1.5 Flash');
       try {
-        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
         const result = await geminiModel.generateContent(message);
         reply = result.response.text();
       } catch (geminiError) {
@@ -197,7 +197,7 @@ router.post('/chat', authenticate, async (req, res) => {
       // Default: Try Gemini first, then DeepSeek, then Claude
       console.log('🌊 No model specified, trying Gemini first');
       try {
-        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
         const result = await geminiModel.generateContent(message);
         reply = result.response.text();
       } catch (geminiError) {
@@ -323,11 +323,11 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-2.0-flash', name: 'Gemini 1.5 Flash', provider: 'Google', context: '1M', speed: 'Fastest' },
+      { id: 'gemini-1.5-flash-latest', name: 'Gemini 1.5 Flash', provider: 'Google', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'DeepSeek V3', provider: 'DeepSeek', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', context: '200K', speed: 'Normal' }
     ],
-    default: 'gemini-2.0-flash'
+    default: 'gemini-1.5-flash-latest'
   });
 });
 
