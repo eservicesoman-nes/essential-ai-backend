@@ -136,7 +136,7 @@ async function authenticate(req, res, next) {
 }
 
 // ============================================================
-// 📍 CHAT ENDPOINT with Gemini 1.5 Flash
+// 📍 CHAT ENDPOINT with gemini-2.5-flash
 // ============================================================
 router.post('/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
@@ -178,7 +178,7 @@ router.post('/chat', authenticate, async (req, res) => {
     
     // ✅ GEMINI PRIORITY - Check if Gemini was selected
     if (model === 'gemini-2.5-flash') {
-      console.log('🌊 Using Gemini 1.5 Flash');
+      console.log('🌊 Using gemini-2.5-flash');
       try {
         const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const result = await geminiModel.generateContent(message);
@@ -323,7 +323,7 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 1.5 Flash', provider: 'Google', context: '1M', speed: 'Fastest' },
+      { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash', provider: 'Google', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'DeepSeek V3', provider: 'DeepSeek', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', context: '200K', speed: 'Normal' }
     ],
