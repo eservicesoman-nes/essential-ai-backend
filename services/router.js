@@ -25,12 +25,32 @@ const anthropic = new Anthropic({
 // ✅ GEMINI INTEGRATION
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
+// ============================================================
+// 🤖 SYSTEM PROMPT - UNIFIED IDENTITY FOR ALL MODELS
+// ============================================================
+const SYSTEM_PROMPT = `You are NES AI, your unified intelligence platform.
+Never mention Google, DeepSeek, Anthropic, OpenAI, or any specific AI company.
+Never say "I am a language model", "trained by", "LLM", or "large language model".
+When asked "Who are you?" or "What are you?" respond with: "I am NES AI, your unified intelligence platform."
+When asked "Who created you?" respond with: "I was created by NES AI Solutions."
+Keep responses helpful, concise, and professional.`;
+
+const WEB_SEARCH_ADDITION = ` You have access to live web search. Provide accurate, up-to-date information with citations when possible.`;
+
+// ============================================================
+
 // Helper: DeepSeek API call
 async function callDeepSeek(messages, webSearch = false) {
   try {
-    const deepseekMessages = webSearch 
-      ? [{ role: 'system', content: 'You have access to live web search. Provide accurate, up-to-date information with citations when possible.' }, ...messages]
-      : messages;
+    let systemContent = SYSTEM_PROMPT;
+    if (webSearch) {
+      systemContent += WEB_SEARCH_ADDITION;
+    }
+    
+    const deepseekMessages = [
+      { role: 'system', content: systemContent },
+      ...messages
+    ];
     
     const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
       method: 'POST',
@@ -61,9 +81,9 @@ async function callDeepSeek(messages, webSearch = false) {
 // Helper: Claude API call
 async function callClaude(messages, webSearch = false) {
   try {
-    let systemPrompt = '';
+    let systemPrompt = SYSTEM_PROMPT;
     if (webSearch) {
-      systemPrompt = 'You have access to live web search. Provide accurate, up-to-date information with citations when possible.';
+      systemPrompt += WEB_SEARCH_ADDITION;
     }
     
     const response = await anthropic.messages.create({
@@ -176,29 +196,35 @@ router.post('/chat', authenticate, async (req, res) => {
     let reply = '';
     let sources = [];
     
-    // ✅ GEMINI PRIORITY - Check if Gemini was selected
+    // ✅ GEMINI 2.5 FLASH with System Instruction
     if (model === 'gemini-2.5-flash') {
-      console.log('🌊 Using gemini-2.5-flash');
+      console.log('🌊 Using gemini-2.5-flash with NES AI identity');
       try {
         const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        const result = await geminiModel.generateContent(message);
+        const result = await geminiModel.generateContent({
+          contents: [{ role: "user", parts: [{ text: message }] }],
+          systemInstruction: SYSTEM_PROMPT + (webSearch ? WEB_SEARCH_ADDITION : '')
+        });
         reply = result.response.text();
       } catch (geminiError) {
         console.error('Gemini error, falling back to DeepSeek:', geminiError);
         reply = await callDeepSeek(messages, webSearch);
       }
     } else if (model === 'deepseek') {
-      console.log('🔵 Using DeepSeek');
+      console.log('🔵 Using DeepSeek with NES AI identity');
       reply = await callDeepSeek(messages, webSearch);
     } else if (model === 'claude') {
-      console.log('🟣 Using Claude');
+      console.log('🟣 Using Claude with NES AI identity');
       reply = await callClaude(messages, webSearch);
     } else {
       // Default: Try Gemini first, then DeepSeek, then Claude
-      console.log('🌊 No model specified, trying Gemini first');
+      console.log('🌊 No model specified, trying Gemini first with NES AI identity');
       try {
         const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-        const result = await geminiModel.generateContent(message);
+        const result = await geminiModel.generateContent({
+          contents: [{ role: "user", parts: [{ text: message }] }],
+          systemInstruction: SYSTEM_PROMPT + (webSearch ? WEB_SEARCH_ADDITION : '')
+        });
         reply = result.response.text();
       } catch (geminiError) {
         console.log('Gemini unavailable, falling back to DeepSeek');
@@ -323,9 +349,9 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-2.5-flash', name: 'gemini-2.5-flash', provider: 'Google', context: '1M', speed: 'Fastest' },
-      { id: 'deepseek', name: 'DeepSeek V3', provider: 'DeepSeek', context: '128K', speed: 'Normal' },
-      { id: 'claude', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', context: '200K', speed: 'Normal' }
+      { id: 'gemini-2.5-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
+      { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
     default: 'gemini-2.5-flash'
   });
