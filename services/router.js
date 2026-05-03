@@ -1,64 +1,31 @@
 const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
-
-// ✅ GEMINI INTEGRATION - ADDED
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-require('dotenv').config();
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Security middleware
-app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
-}));
-
-// CORS configuration
-app.use(cors({
-  origin: ['https://essential-ai-frontend.vercel.app', 'http://localhost:3000', 'http://localhost:5173'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-app.use(express.json({ limit: '10mb' }));
-
-// Rate limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: 'Too many requests from this IP',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', limiter);
-
-// Supabase
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+// ============================================================
+// 🔐 SUPABASE CONFIGURATION - YOUR KEYS GO HERE
+// ============================================================
+const supabaseUrl = process.env.SUPABASE_URL || 'https://sfpfjjdtczvuxyhjievt.supabase.co';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MH7rnJ7r8_-1TzGXcieNfA_NXoHQZbm';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// ============================================================
 
-// OpenAI (DALL-E 3)
+// Initialize AI clients
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Anthropic Claude
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// ✅ GEMINI INITIALIZATION - ADDED
+// ✅ GEMINI INTEGRATION
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
-// DeepSeek API call helper (primary)
+// Helper: DeepSeek API call
 async function callDeepSeek(messages, webSearch = false) {
   try {
     const deepseekMessages = webSearch 
@@ -80,8 +47,7 @@ async function callDeepSeek(messages, webSearch = false) {
     });
     
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`DeepSeek API error: ${response.status} - ${error}`);
+      throw new Error(`DeepSeek API error: ${response.status}`);
     }
     
     const data = await response.json();
@@ -92,7 +58,7 @@ async function callDeepSeek(messages, webSearch = false) {
   }
 }
 
-// Claude API call helper (fallback)
+// Helper: Claude API call
 async function callClaude(messages, webSearch = false) {
   try {
     let systemPrompt = '';
@@ -118,42 +84,7 @@ async function callClaude(messages, webSearch = false) {
   }
 }
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Get user's usage for today
-app.get('/api/usage', authenticate, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const today = new Date().toISOString().split('T')[0];
-    
-    let { data: usage, error } = await supabase
-      .from('usage')
-      .select('chats_used, images_used, docs_used')
-      .eq('user_id', userId)
-      .eq('date', today)
-      .single();
-    
-    if (error && error.code === 'PGRST116') {
-      usage = { chats_used: 0, images_used: 0, docs_used: 0 };
-    } else if (error) {
-      throw error;
-    }
-    
-    res.json({
-      chats: usage.chats_used || 0,
-      images: usage.images_used || 0,
-      docs: usage.docs_used || 0
-    });
-  } catch (error) {
-    console.error('Usage error:', error);
-    res.status(500).json({ error: 'Failed to fetch usage' });
-  }
-});
-
-// Increment usage counter
+// Helper: Increment usage counter
 async function incrementUsage(userId, type) {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -204,8 +135,10 @@ async function authenticate(req, res, next) {
   }
 }
 
-// ✅ MODIFIED: Chat endpoint with Gemini support
-app.post('/api/chat', authenticate, async (req, res) => {
+// ============================================================
+// 📍 CHAT ENDPOINT with Gemini 1.5 Flash
+// ============================================================
+router.post('/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
   
   try {
@@ -225,7 +158,7 @@ app.post('/api/chat', authenticate, async (req, res) => {
       .single();
     
     const chatsUsed = usage?.chats_used || 0;
-    const limit = 50; // Free tier limit
+    const limit = 50;
     
     if (chatsUsed >= limit) {
       return res.status(429).json({ 
@@ -243,7 +176,7 @@ app.post('/api/chat', authenticate, async (req, res) => {
     let reply = '';
     let sources = [];
     
-    // ✅ GEMINI PRIORITY - Check if Gemini was selected or use as primary
+    // ✅ GEMINI PRIORITY - Check if Gemini was selected
     if (model === 'gemini-1.5-flash') {
       console.log('🌊 Using Gemini 1.5 Flash');
       try {
@@ -254,7 +187,7 @@ app.post('/api/chat', authenticate, async (req, res) => {
         console.error('Gemini error, falling back to DeepSeek:', geminiError);
         reply = await callDeepSeek(messages, webSearch);
       }
-    } else if (model === 'deepseek' || (!model && process.env.PRIMARY_MODEL === 'deepseek')) {
+    } else if (model === 'deepseek') {
       console.log('🔵 Using DeepSeek');
       reply = await callDeepSeek(messages, webSearch);
     } else if (model === 'claude') {
@@ -292,14 +225,14 @@ app.post('/api/chat', authenticate, async (req, res) => {
     
   } catch (error) {
     console.error('Chat error:', error);
-    const duration = Date.now() - startTime;
-    console.log(`Chat request failed after ${duration}ms`);
     res.status(500).json({ error: 'Failed to process chat request' });
   }
 });
 
-// Image generation endpoint (DALL-E 3)
-app.post('/api/image', authenticate, async (req, res) => {
+// ============================================================
+// 📍 IMAGE GENERATION ENDPOINT (DALL-E)
+// ============================================================
+router.post('/image', authenticate, async (req, res) => {
   try {
     const { prompt } = req.body;
     
@@ -307,7 +240,7 @@ app.post('/api/image', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
     
-    // Check usage (Free: 3 images/day)
+    // Check usage limits
     const today = new Date().toISOString().split('T')[0];
     const { data: usage, error: usageError } = await supabase
       .from('usage')
@@ -352,11 +285,45 @@ app.post('/api/image', authenticate, async (req, res) => {
   }
 });
 
-// Get available models
-app.get('/api/models', authenticate, async (req, res) => {
+// ============================================================
+// 📍 GET USER USAGE
+// ============================================================
+router.get('/usage', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date().toISOString().split('T')[0];
+    
+    let { data: usage, error } = await supabase
+      .from('usage')
+      .select('chats_used, images_used, docs_used')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
+    
+    if (error && error.code === 'PGRST116') {
+      usage = { chats_used: 0, images_used: 0, docs_used: 0 };
+    } else if (error) {
+      throw error;
+    }
+    
+    res.json({
+      chats: usage.chats_used || 0,
+      images: usage.images_used || 0,
+      docs: usage.docs_used || 0
+    });
+  } catch (error) {
+    console.error('Usage error:', error);
+    res.status(500).json({ error: 'Failed to fetch usage' });
+  }
+});
+
+// ============================================================
+// 📍 GET AVAILABLE MODELS
+// ============================================================
+router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'Google', context: '1M', speed: 'Fast' },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'Google', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'DeepSeek V3', provider: 'DeepSeek', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'Claude 3.5 Sonnet', provider: 'Anthropic', context: '200K', speed: 'Normal' }
     ],
@@ -364,7 +331,4 @@ app.get('/api/models', authenticate, async (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 Health check: http://localhost:${PORT}/health`);
-});
+module.exports = router;
