@@ -41,7 +41,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ✅ USE YOUR ROUTER — This makes /api/chat, /api/image, /api/usage, /api/models work
+// ✅ USE YOUR ROUTER
 app.use('/api', router);
 
 // 404 handler
