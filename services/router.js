@@ -156,7 +156,7 @@ async function authenticate(req, res, next) {
 }
 
 // ============================================================
-// 📍 CHAT ENDPOINT with gemini-2.5-flash
+// 📍 CHAT ENDPOINT with gemini-3.1-flash
 // ============================================================
 router.post('/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
@@ -197,10 +197,10 @@ router.post('/chat', authenticate, async (req, res) => {
     let sources = [];
     
     // ✅ GEMINI 2.5 FLASH with System Instruction
-    if (model === 'gemini-2.5-flash') {
-      console.log('🌊 Using gemini-2.5-flash with NES AI identity');
+    if (model === 'gemini-3.1-flash') {
+      console.log('🌊 Using gemini-3.1-flash with NES AI identity');
       try {
-        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash' });
         const result = await geminiModel.generateContent({
           contents: [{ role: "user", parts: [{ text: message }] }],
           systemInstruction: SYSTEM_PROMPT + (webSearch ? WEB_SEARCH_ADDITION : '')
@@ -220,7 +220,7 @@ router.post('/chat', authenticate, async (req, res) => {
       // Default: Try Gemini first, then DeepSeek, then Claude
       console.log('🌊 No model specified, trying Gemini first with NES AI identity');
       try {
-        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const geminiModel = genAI.getGenerativeModel({ model: 'gemini-3.1-flash' });
         const result = await geminiModel.generateContent({
           contents: [{ role: "user", parts: [{ text: message }] }],
           systemInstruction: SYSTEM_PROMPT + (webSearch ? WEB_SEARCH_ADDITION : '')
@@ -397,11 +397,11 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-2.5-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'gemini-3.1-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
-    default: 'gemini-2.5-flash'
+    default: 'gemini-3.1-flash'
   });
 });
 
