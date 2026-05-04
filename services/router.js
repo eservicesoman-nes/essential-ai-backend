@@ -26,13 +26,30 @@ const anthropic = new Anthropic({
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 // ============================================================
-// 🤖 SYSTEM PROMPT - UNIFIED IDENTITY FOR ALL MODELS
+// 🤖 SYSTEM PROMPT - UNIFIED IDENTITY FOR ALL MODELS (WITH REAL DATE)
 // ============================================================
+
+// Get real current date from server
+const now = new Date();
+const todayDate = now.toLocaleDateString('en-US', { 
+  weekday: 'long', 
+  year: 'numeric', 
+  month: 'long', 
+  day: 'numeric' 
+});
+const currentTime = now.toLocaleTimeString('en-US', { 
+  hour: '2-digit', 
+  minute: '2-digit', 
+  hour12: true 
+});
+
 const SYSTEM_PROMPT = `You are NES AI, your unified intelligence platform.
+Today's date is ${todayDate}. The current time is ${currentTime}.
 Never mention Google, DeepSeek, Anthropic, OpenAI, or any specific AI company.
 Never say "I am a language model", "trained by", "LLM", or "large language model".
 When asked "Who are you?" or "What are you?" respond with: "I am NES AI, your unified intelligence platform."
 When asked "Who created you?" respond with: "I was created by NES AI Solutions."
+When asked for the current date or time, use the date and time provided above.
 Keep responses helpful, concise, and professional.`;
 
 const WEB_SEARCH_ADDITION = ` You have access to live web search. Provide accurate, up-to-date information with citations when possible.`;
@@ -196,7 +213,7 @@ router.post('/chat', authenticate, async (req, res) => {
     let reply = '';
     let sources = [];
     
-    // ✅ GEMINI 2.5 FLASH with System Instruction
+    // ✅ GEMINI 3.1 FLASH with System Instruction (includes real date)
     if (model === 'gemini-3.1-flash') {
       console.log('🌊 Using gemini-3.1-flash with NES AI identity');
       try {
