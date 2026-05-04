@@ -256,7 +256,7 @@ router.post('/chat', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 📍 IMAGE GENERATION ENDPOINT (DALL-E)
+// 📍 IMAGE GENERATION ENDPOINT - FLUX SCHNELL (PRIMARY) + DALL-E (FALLBACK)
 // ============================================================
 router.post('/image', authenticate, async (req, res) => {
   try {
@@ -266,7 +266,7 @@ router.post('/image', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
     
-    // Check usage limits
+    // Check usage limits (Free: 3/day)
     const today = new Date().toISOString().split('T')[0];
     const { data: usage, error: usageError } = await supabase
       .from('usage')
@@ -286,22 +286,70 @@ router.post('/image', authenticate, async (req, res) => {
       });
     }
     
-    const response = await openai.images.generate({
-      model: 'dall-e-3',
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
-      quality: 'standard',
-    });
+    let imageUrl = '';
+    let revisedPrompt = '';
+    let modelUsed = 'flux-schnell';
     
-    const imageUrl = response.data[0].url;
-    const revisedPrompt = response.data[0].revised_prompt;
+    // ✅ PRIMARY: Try Flux Schnell (fal.ai)
+    try {
+      console.log('🎨 Generating image with Flux Schnell (fal.ai)');
+      
+      const falResponse = await fetch('https://fal.run/fal-ai/flux/schnell', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Key ${process.env.FAL_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          image_size: 'square_hd',
+          num_inference_steps: 4,
+          guidance_scale: 0,
+          num_images: 1,
+          enable_safety_checker: true
+        })
+      });
+      
+      if (!falResponse.ok) {
+        throw new Error(`Flux API error: ${falResponse.status}`);
+      }
+      
+      const falData = await falResponse.json();
+      imageUrl = falData.images[0].url;
+      revisedPrompt = prompt;
+      console.log('✅ Flux Schnell image generated successfully');
+      
+    } catch (fluxError) {
+      // ⚠️ FALLBACK: DALL-E 3 (only if Flux fails)
+      console.error('Flux error, falling back to DALL-E 3:', fluxError.message);
+      modelUsed = 'dall-e-3';
+      
+      try {
+        const dalleResponse = await openai.images.generate({
+          model: 'dall-e-3',
+          prompt: prompt,
+          n: 1,
+          size: '1024x1024',
+          quality: 'standard',
+        });
+        
+        imageUrl = dalleResponse.data[0].url;
+        revisedPrompt = dalleResponse.data[0].revised_prompt;
+        console.log('✅ DALL-E 3 fallback image generated successfully');
+        
+      } catch (dalleError) {
+        console.error('DALL-E fallback also failed:', dalleError);
+        throw new Error('Both Flux and DALL-E image generation failed');
+      }
+    }
     
+    // Increment usage counter
     await incrementUsage(req.user.id, 'image');
     
     res.json({ 
       url: imageUrl, 
       revisedPrompt: revisedPrompt,
+      model: modelUsed,
       usage: { remaining: limit - (imagesUsed + 1) }
     });
     
