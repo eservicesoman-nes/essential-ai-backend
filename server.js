@@ -55,7 +55,9 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Essential AI backend running on port ${PORT} [production]`);
-  console.log(`✅ Gemini 1.5 Flash is ready`);
-  console.log(`✅ DeepSeek and Claude as fallbacks`);
+  console.log(`🚀 NES AI backend running on port ${PORT} [production]`);
+  console.log(`✅ Gemini 2.5 Flash is ready (primary chat model)`);
+  console.log(`✅ Flux 2 Schnell is ready (primary image model via fal.ai)`);
+  console.log(`✅ DeepSeek and Claude as fallbacks for chat`);
+  console.log(`✅ DALL-E 3 as fallback for images (emergency only)`);
 });
