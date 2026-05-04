@@ -6,56 +6,50 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ============================================================
-// 🔐 SUPABASE CONFIGURATION
+// 🔐 SUPABASE CONFIGURATION - FROM ENVIRONMENT VARIABLES
 // ============================================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://sfpfjjdtczvuxyhjievt.supabase.co';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MH7rnJ7r8_-1TzGXcieNfA_NXoHQZbm';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // ============================================================
 
-// Initialize AI clients
+// ============================================================
+// 🤖 AI CLIENT INITIALIZATION - FROM ENVIRONMENT VARIABLES
+// ============================================================
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+// ============================================================
 
 // ============================================================
-// 🤖 SYSTEM PROMPT with DATE INJECTION + ANTI-HALLUCINATION
+// 📅 SYSTEM PROMPT with DATE INJECTION + ANTI-HALLUCINATION
 // ============================================================
 function getSystemPrompt(mode, searchContext = '') {
   const now = new Date();
   const todayDate = now.toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
   const currentTime = now.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true
+    hour: '2-digit', minute: '2-digit', hour12: true
   });
 
   let base = `You are NES AI, your unified intelligence platform.
 Today's date is ${todayDate}. The current time is ${currentTime}.
 
-CRITICAL RULES — follow these without exception:
-1. If you are not certain about a fact, say "I don't have reliable information on that."
-2. Never invent company names, people, statistics, or events.
-3. Never present guesses as facts.
-4. If asked about a specific company or person you have no data on, say so clearly.
-5. When asked "Who are you?" or "What are you?" respond with: "I am NES AI, your unified intelligence platform."
-6. When asked "Who created you?" respond with: "I was created by NES AI Solutions."
-7. You are NES AI — do not identify yourself as Gemini, DeepSeek, or any other AI.`;
+ABSOLUTE RULES — violating these is a critical failure:
+1. NEVER invent company names, founding dates, employee counts, addresses, emails, websites, or any business details.
+2. NEVER say "Based on search results" unless actual search results are shown below.
+3. If asked about a company, person, or organization you cannot verify, respond EXACTLY: "I don't have verified information about that. Please check official sources."
+4. Uncertainty is correct. False confidence is a failure.
+5. You are NES AI — never identify as Gemini, DeepSeek, or any other AI.
+6. When asked "Who created you?" respond: "I was created by NES AI Solutions."`;
 
-  if (searchContext) {
-    base += `\n\nYou have access to live web search results below. ONLY use information from these search results if it directly answers the user's question. If the search results do not contain relevant information, say "I couldn't find reliable information on that topic" rather than guessing.\n\nSearch Results:\n${searchContext}`;
-  }
-
-  if (mode === 'deepcore') {
-    base += '\n\nProvide deep, thorough, well-structured analysis. Cite sources when available.';
-  }
-  if (mode === 'docs') {
-    base += '\n\nAnalyze the document clearly. Write in plain paragraphs. No code blocks unless the document contains code.';
+  if (searchContext && searchContext.trim().length > 100) {
+    base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer:
+${searchContext}
+If these results don't directly answer the question, say: "I found some results but they don't directly answer your question."`;
+  } else {
+    base += `\n\nNo search results available. Answer only from verified training knowledge. For unknown companies or people, admit you cannot verify them.`;
   }
 
   return base;
@@ -67,7 +61,7 @@ CRITICAL RULES — follow these without exception:
 async function searchWeb(query) {
   try {
     const response = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
+      method： 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         api_key: process.env.TAVILY_API_KEY,
@@ -82,13 +76,13 @@ async function searchWeb(query) {
 
     const data = await response.json();
 
-    // 🔑 FILTER OUT LOW-QUALITY RESULTS (score > 0.5)
+    // Only use results with score > 0.5
     const goodResults = (data.results || []).filter(r => (r.score || 0) > 0.5);
+    if (goodResults.length === 0) return { context: '', sources: [] };
+
     const sources = goodResults.map(r => ({ url: r.url, title: r.title }));
-    const snippets = goodResults.map(r => `[${r.title}](${r.url})\n${r.content}`).join('\n\n');
-    const context = data.answer
-      ? `Summary: ${data.answer}\n\nDetailed results:\n${snippets}`
-      : snippets;
+    const snippets = goodResults.map(r => `SOURCE: ${r.title} (${r.url})\n${r.content}`).join('\n\n---\n\n');
+    const context = data.answer ? `Direct answer: ${data.answer}\n\nSupporting sources:\n${snippets}` : snippets;
 
     return { context, sources };
   } catch (error) {
@@ -98,44 +92,42 @@ async function searchWeb(query) {
 }
 
 // ============================================================
-// 🤖 AI MODEL CALLS
+// 📧 GEMINI 3.1 FLASH CALL
 // ============================================================
-
-// Gemini 3.1 Flash with LOW TEMPERATURE
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
     model: 'gemini-3.1-flash',
+    systemInstruction: systemPrompt,
     generationConfig: {
-      temperature: 0.2,      // 🔑 Low = factual, less hallucination
+      temperature: 0.1,           // Very low = factual, less hallucination
       topP: 0.8,
       maxOutputTokens: 2048
     }
   });
 
-  // Build chat history for Gemini
   const chatHistory = history
     .filter(h => h.role === 'user' || h.role === 'assistant')
+    .slice(-8)
     .map(h => ({
       role: h.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: h.content }]
     }));
 
-  const chat = model.startChat({
-    history: chatHistory,
-    systemInstruction: systemPrompt
-  });
-
+  const chat = model.startChat({ history: chatHistory });
   const result = await chat.sendMessage(message);
   return result.response.text();
 }
 
-// DeepSeek fallback with LOW TEMPERATURE
-async function callDeepSeek(message, history, systemPrompt) {
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...history.slice(-8).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content })),
-    { role: 'user', content: message }
-  ];
+// ============================================================
+// 🔵 DEEPSEEK FALLBACK
+// ============================================================
+async function callDeepSeek(messages, webSearch = false) {
+  let systemContent = `You are NES AI, your unified intelligence platform.
+Today's date is ${new Date().toLocaleDateString()}.
+Never invent facts or companies. If unsure, say you don't know.`;
+  if (webSearch) systemContent += ` You have access to live web search. Use it for current information.`;
+
+  const deepseekMessages = [{ role: 'system', content: systemContent }, ...messages];
 
   const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
@@ -145,47 +137,126 @@ async function callDeepSeek(message, history, systemPrompt) {
     },
     body: JSON.stringify({
       model: 'deepseek-chat',
-      messages: messages,
-      max_tokens: 2048,
-      temperature: 0.2
+      messages: deepseekMessages,
+      temperature: 0.1,
+      max_tokens: 4000
     })
   });
 
-  if (!response.ok) throw new Error(`DeepSeek error: ${response.status}`);
+  if (!response.ok) throw new Error(`DeepSeek API error: ${response.status}`);
   const data = await response.json();
   return data.choices[0].message.content;
 }
 
-// Claude fallback
-async function callClaude(message, history, systemPrompt) {
+// ============================================================
+// 🟣 CLAUDE FALLBACK
+// ============================================================
+async function callClaude(messages, webSearch = false) {
+  let systemPrompt = `You are NES AI, your unified intelligence platform.
+Today's date is ${new Date().toLocaleDateString()}.
+Never invent facts or companies. If unsure, say you don't know.`;
+  if (webSearch) systemPrompt += ` You have access to live web search. Use it for current information.`;
+
   const response = await anthropic.messages.create({
     model: 'claude-3-haiku-20240307',
-    max_tokens: 2048,
-    temperature: 0.2,
+    max_tokens: 4000,
+    temperature: 0.1,
     system: systemPrompt,
-    messages: [
-      ...history.slice(-8).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content })),
-      { role: 'user', content: message }
-    ]
+    messages: messages.map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content
+    }))
   });
+
   return response.content[0].text;
 }
 
 // ============================================================
-// 📍 MAIN CHAT ENDPOINT
+// 📈 INCREMENT USAGE COUNTER
 // ============================================================
-router.post('/chat', async (req, res) => {
+async function incrementUsage(userId, type) {
   try {
-    const { message, mode = 'chat', webSearch = false, history = [], model } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+    const column = type === 'chat' ? 'chats_used' : (type === 'image' ? 'images_used' : 'docs_used');
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('usage')
+      .select('id, ' + column)
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
+
+    if (fetchError && fetchError.code === 'PGRST116') {
+      await supabase.from('usage').insert({ user_id: userId, date: today, [column]: 1 });
+    } else if (!fetchError && existing) {
+      await supabase.from('usage').update({ [column]: (existing[column] || 0) + 1 }).eq('id', existing.id);
+    }
+  } catch (error) {
+    console.error('Increment usage error:', error);
+  }
+}
+
+// ============================================================
+// 🔐 AUTHENTICATION MIDDLEWARE
+// ============================================================
+async function authenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return res.status(401).json({ error: 'Invalid token' });
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Auth error:', error);
+    res.status(401).json({ error: 'Authentication failed' });
+  }
+}
+
+// ============================================================
+// 📍 CHAT ENDPOINT with GEMINI 3.1 FLASH
+// ============================================================
+router.post('/chat', authenticate, async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { message, mode, webSearch = false, history = [], model } = req.body;
 
     if (!message || message.trim().length === 0) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
+    // Check usage limits (Free: 50/day)
+    const today = new Date().toISOString().split('T')[0];
+    const { data: usage, error: usageError } = await supabase
+      .from('usage')
+      .select('chats_used')
+      .eq('user_id', req.user.id)
+      .eq('date', today)
+      .single();
+
+    const chatsUsed = usage?.chats_used || 0;
+    const limit = 50;
+
+    if (chatsUsed >= limit) {
+      return res.status(429).json({ error: 'Daily message limit reached', limit, used: chatsUsed });
+    }
+
+    const messages = [
+      ...history.map(h => ({ role: h.role, content: h.content })),
+      { role: 'user', content: message }
+    ];
+
+    let reply = '';
     let sources = [];
     let searchContext = '';
 
-    // Fetch live web data if search enabled
+    // Fetch web search results if enabled
     if (webSearch && ['chat', 'deepcore'].includes(mode)) {
       const searchResult = await searchWeb(message);
       searchContext = searchResult.context;
@@ -193,79 +264,67 @@ router.post('/chat', async (req, res) => {
     }
 
     const systemPrompt = getSystemPrompt(mode, searchContext);
-    let reply = '';
-    let modelUsed = '';
-    let fallbackUsed = false;
 
-    // ✅ Use Gemini 3.1 Flash if requested, otherwise try gemini first
+    // Try Gemini 3.1 Flash first
     if (model === 'gemini-3.1-flash' || !model) {
+      console.log('🌊 Using Gemini 3.1 Flash');
       try {
-        console.log('🌊 Using Gemini 3.1 Flash');
-        reply = await callGemini(message, history, systemPrompt);
-        modelUsed = 'gemini-3.1-flash';
-      } catch (error) {
-        console.warn('Gemini failed, falling back to DeepSeek:', error.message);
-        fallbackUsed = true;
-        try {
-          console.log('🔵 Falling back to DeepSeek');
-          reply = await callDeepSeek(message, history, systemPrompt);
-          modelUsed = 'deepseek-chat';
-        } catch (error2) {
-          console.warn('DeepSeek failed, falling back to Claude:', error2.message);
-          console.log('🟣 Falling back to Claude');
-          reply = await callClaude(message, history, systemPrompt);
-          modelUsed = 'claude-haiku';
-        }
+        const geminiModel = genAI.getGenerativeModel({
+          model: 'gemini-3.1-flash',
+          systemInstruction: systemPrompt,
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+        });
+        const result = await geminiModel.generateContent(message);
+        reply = result.response.text();
+      } catch (geminiError) {
+        console.error('Gemini error, falling back to DeepSeek:', geminiError);
+        reply = await callDeepSeek(messages, webSearch);
       }
     } else if (model === 'deepseek') {
       console.log('🔵 Using DeepSeek');
-      reply = await callDeepSeek(message, history, systemPrompt);
-      modelUsed = 'deepseek-chat';
+      reply = await callDeepSeek(messages, webSearch);
     } else if (model === 'claude') {
       console.log('🟣 Using Claude');
-      reply = await callClaude(message, history, systemPrompt);
-      modelUsed = 'claude-haiku';
+      reply = await callClaude(messages, webSearch);
     } else {
-      // Default: try Gemini first
+      // Default: try Gemini
+      console.log('🌊 Trying Gemini 3.1 Flash (default)');
       try {
-        console.log('🌊 Trying Gemini 3.1 Flash (default)');
-        reply = await callGemini(message, history, systemPrompt);
-        modelUsed = 'gemini-3.1-flash';
-      } catch (error) {
-        console.warn('Gemini failed, falling back to DeepSeek:', error.message);
+        const geminiModel = genAI.getGenerativeModel({
+          model: 'gemini-3.1-flash',
+          systemInstruction: systemPrompt,
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+        });
+        const result = await geminiModel.generateContent(message);
+        reply = result.response.text();
+      } catch (geminiError) {
+        console.log('Gemini unavailable, falling back to DeepSeek');
         try {
-          reply = await callDeepSeek(message, history, systemPrompt);
-          modelUsed = 'deepseek-chat';
-        } catch (error2) {
-          reply = await callClaude(message, history, systemPrompt);
-          modelUsed = 'claude-haiku';
+          reply = await callDeepSeek(messages, webSearch);
+        } catch (deepseekError) {
+          console.log('DeepSeek unavailable, falling back to Claude');
+          reply = await callClaude(messages, webSearch);
         }
       }
     }
 
-    // Simple usage tracking (increment)
-    // Note: You'll need to implement proper user auth and database tracking
+    await incrementUsage(req.user.id, 'chat');
 
-    const duration = Date.now() - (req.startTime || Date.now());
-    console.log(`Chat request completed in ${duration}ms using ${modelUsed}${fallbackUsed ? ' (fallback)' : ''}`);
+    const duration = Date.now() - startTime;
+    console.log(`Chat request completed in ${duration}ms`);
 
-    res.json({
-      reply,
-      sources,
-      model: modelUsed,
-      fallbackUsed
-    });
+    res.json({ reply, sources, usage: { remaining: limit - (chatsUsed + 1) } });
 
   } catch (error) {
-    console.error('Chat endpoint error:', error);
+    console.error('Chat error:', error);
     res.status(500).json({ error: 'Failed to process chat request' });
   }
 });
 
 // ============================================================
-// 📍 IMAGE GENERATION ENDPOINT
+// 📍 IMAGE GENERATION ENDPOINT - FLUX + DALL-E FALLBACK
 // ============================================================
-router.post('/image', async (req, res) => {
+router.post('/image', authenticate, async (req, res) => {
   try {
     const { prompt } = req.body;
 
@@ -273,11 +332,27 @@ router.post('/image', async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
+    // Check usage limits (Free: 3/day)
+    const today = new Date().toISOString().split('T')[0];
+    const { data: usage, error: usageError } = await supabase
+      .from('usage')
+      .select('images_used')
+      .eq('user_id', req.user.id)
+      .eq('date', today)
+      .single();
+
+    const imagesUsed = usage?.images_used || 0;
+    const limit = 3;
+
+    if (imagesUsed >= limit) {
+      return res.status(429).json({ error: 'Daily image limit reached', limit, used: imagesUsed });
+    }
+
     let imageUrl = '';
     let revisedPrompt = '';
     let modelUsed = 'flux-schnell';
 
-    // Try Flux Schnell (fal.ai)
+    // Try Flux Schnell first
     try {
       console.log('🎨 Generating image with Flux Schnell');
 
@@ -296,16 +371,15 @@ router.post('/image', async (req, res) => {
         })
       });
 
-      if (!falResponse.ok) throw new Error(`Flux error: ${falResponse.status}`);
+      if (!falResponse.ok) throw new Error(`Flux API error: ${falResponse.status}`);
 
       const falData = await falResponse.json();
       imageUrl = falData.images[0].url;
       revisedPrompt = prompt;
-      console.log('✅ Flux image generated');
+      console.log('✅ Flux Schnell image generated');
 
     } catch (fluxError) {
-      // Fallback to DALL-E 3
-      console.warn('Flux failed, falling back to DALL-E 3:', fluxError.message);
+      console.error('Flux error, falling back to DALL-E 3:', fluxError.message);
       modelUsed = 'dall-e-3';
 
       const dalleResponse = await openai.images.generate({
@@ -318,14 +392,12 @@ router.post('/image', async (req, res) => {
 
       imageUrl = dalleResponse.data[0].url;
       revisedPrompt = dalleResponse.data[0].revised_prompt;
-      console.log('✅ DALL-E 3 image generated');
+      console.log('✅ DALL-E 3 fallback image generated');
     }
 
-    res.json({
-      url: imageUrl,
-      revisedPrompt: revisedPrompt,
-      model: modelUsed
-    });
+    await incrementUsage(req.user.id, 'image');
+
+    res.json({ url: imageUrl, revisedPrompt: revisedPrompt, model: modelUsed, usage: { remaining: limit - (imagesUsed + 1) } });
 
   } catch (error) {
     console.error('Image generation error:', error);
@@ -336,13 +408,28 @@ router.post('/image', async (req, res) => {
 // ============================================================
 // 📍 GET USER USAGE
 // ============================================================
-router.get('/usage', async (req, res) => {
+router.get('/usage', authenticate, async (req, res) => {
   try {
-    // Placeholder — implement with your auth and database
+    const userId = req.user.id;
+    const today = new Date().toISOString().split('T')[0];
+
+    let { data: usage, error } = await supabase
+      .from('usage')
+      .select('chats_used, images_used, docs_used')
+      .eq('user_id', userId)
+      .eq('date', today)
+      .single();
+
+    if (error && error.code === 'PGRST116') {
+      usage = { chats_used: 0, images_used: 0, docs_used: 0 };
+    } else if (error) {
+      throw error;
+    }
+
     res.json({
-      chats: 0,
-      images: 0,
-      docs: 0
+      chats: usage.chats_used || 0,
+      images: usage.images_used || 0,
+      docs: usage.docs_used || 0
     });
   } catch (error) {
     console.error('Usage error:', error);
@@ -353,7 +440,7 @@ router.get('/usage', async (req, res) => {
 // ============================================================
 // 📍 GET AVAILABLE MODELS
 // ============================================================
-router.get('/models', (req, res) => {
+router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
       { id: 'gemini-3.1-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
