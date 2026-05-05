@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: n8n
+    runtime: image
+    plan: free
+    dockerCommand: n8n start --tunnel
+    envVars:
+      - key: N8N_PROTOCOL
+        value: https
+      - key: N8N_HOST
+        value: n8n.onrender.com
+      - key: WEBHOOK_URL
+        value: https://n8n.onrender.com
+      - key: N8N_ENCRYPTION_KEY
+        generateValue: true
+      - key: DB_TYPE
+        value: sqlite
