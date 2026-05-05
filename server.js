@@ -30,7 +30,7 @@ app.use(express.json({ limit: '10mb' }));
 // Rate limiting
 app.use('/api/', rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests from this IP.' }
