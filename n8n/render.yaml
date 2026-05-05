@@ -1,10 +1,9 @@
 services:
   - type: web
     name: n8n
-    runtime: image
-    image: n8nio/n8n:latest
+    runtime: docker
+    repo: https://github.com/n8n-io/n8n
     plan: free
-    dockerCommand: n8n start --tunnel
     envVars:
       - key: N8N_PROTOCOL
         value: https
