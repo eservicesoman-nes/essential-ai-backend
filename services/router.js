@@ -61,7 +61,7 @@ If these results don't directly answer the question, say: "I found some results 
 async function searchWeb(query) {
   try {
     const response = await fetch('https://api.tavily.com/search', {
-      method： 'POST',
+      method: 'POST',  // ✅ Fixed: standard colon, not full-width colon
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         api_key: process.env.TAVILY_API_KEY,
@@ -92,14 +92,14 @@ async function searchWeb(query) {
 }
 
 // ============================================================
-// 📧 GEMINI 3.1 FLASH CALL
+// 📧 GEMINI 3 FLASH CALL (CORRECT MODEL)
 // ============================================================
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.1-flash',
+    model: 'gemini-3-flash-001',           // ✅ CORRECT STABLE MODEL
     systemInstruction: systemPrompt,
     generationConfig: {
-      temperature: 0.1,           // Very low = factual, less hallucination
+      temperature: 0.1,
       topP: 0.8,
       maxOutputTokens: 2048
     }
@@ -149,7 +149,7 @@ Never invent facts or companies. If unsure, say you don't know.`;
 }
 
 // ============================================================
-// 🟣 CLAUDE FALLBACK
+// 🟣 CLAUDE FALLBACK (CORRECT MODEL)
 // ============================================================
 async function callClaude(messages, webSearch = false) {
   let systemPrompt = `You are NES AI, your unified intelligence platform.
@@ -158,7 +158,7 @@ Never invent facts or companies. If unsure, say you don't know.`;
   if (webSearch) systemPrompt += ` You have access to live web search. Use it for current information.`;
 
   const response = await anthropic.messages.create({
-    model: 'claude-3-haiku-20240307',
+    model: 'claude-haiku-4-5-20251001',    // ✅ CORRECT CURRENT MODEL
     max_tokens: 4000,
     temperature: 0.1,
     system: systemPrompt,
@@ -219,7 +219,7 @@ async function authenticate(req, res, next) {
 }
 
 // ============================================================
-// 📍 CHAT ENDPOINT with GEMINI 3.1 FLASH
+// 📍 CHAT ENDPOINT with CORRECT GEMINI MODEL
 // ============================================================
 router.post('/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
@@ -265,12 +265,12 @@ router.post('/chat', authenticate, async (req, res) => {
 
     const systemPrompt = getSystemPrompt(mode, searchContext);
 
-    // Try Gemini 3.1 Flash first
-    if (model === 'gemini-3.1-flash' || !model) {
-      console.log('🌊 Using Gemini 3.1 Flash');
+    // Try Gemini first (using correct model)
+    if (model === 'gemini-3-flash-001' || model === 'gemini-3.1-flash' || !model) {
+      console.log('🌊 Using Gemini 3 Flash');
       try {
         const geminiModel = genAI.getGenerativeModel({
-          model: 'gemini-3.1-flash',
+          model: 'gemini-3-flash-001',
           systemInstruction: systemPrompt,
           generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
         });
@@ -288,10 +288,10 @@ router.post('/chat', authenticate, async (req, res) => {
       reply = await callClaude(messages, webSearch);
     } else {
       // Default: try Gemini
-      console.log('🌊 Trying Gemini 3.1 Flash (default)');
+      console.log('🌊 Trying Gemini 3 Flash (default)');
       try {
         const geminiModel = genAI.getGenerativeModel({
-          model: 'gemini-3.1-flash',
+          model: 'gemini-3-flash-001',
           systemInstruction: systemPrompt,
           generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
         });
@@ -438,16 +438,16 @@ router.get('/usage', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 📍 GET AVAILABLE MODELS
+// 📍 GET AVAILABLE MODELS (UPDATED)
 // ============================================================
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-3.1-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'gemini-3-flash-001', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
-    default: 'gemini-3.1-flash'
+    default: 'gemini-3-flash-001'
   });
 });
 
