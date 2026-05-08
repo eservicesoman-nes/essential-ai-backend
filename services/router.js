@@ -112,7 +112,7 @@ async function searchWeb(query) {
 // ============================================================
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-001',
+    model: 'gemini-2.0-flash-001',
     systemInstruction: systemPrompt,
     generationConfig: {
       temperature: 0.1,
@@ -274,7 +274,7 @@ router.post('/chat', authenticate, async (req, res) => {
     try {
       console.log('🌊 Using Gemini 3 Flash');
       const geminiModel = genAI.getGenerativeModel({
-        model: 'gemini-3-flash-001',
+        model: 'gemini-2.0-flash-001',
         systemInstruction: systemPrompt,
         generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
       });
