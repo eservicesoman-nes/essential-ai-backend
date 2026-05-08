@@ -1,11 +1,8 @@
 require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-
-// Import your router (has all the Gemini/DeepSeek/Claude logic)
 const router = require('./services/router');
 
 const app = express();
@@ -37,13 +34,13 @@ app.use('/api/', rateLimit({
 }));
 
 // ============================================================
-// ✅ ROOT ROUTE - Prevents 404 on base URL
+// ✅ ROOT ROUTE
 // ============================================================
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     message: 'NES AI backend is running',
-    version: '3.0',
+    version: '4.0',
     endpoints: ['/api/chat', '/api/image', '/api/usage', '/api/models', '/health']
   });
 });
@@ -53,7 +50,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ✅ USE YOUR ROUTER
+// Routes
 app.use('/api', router);
 
 // 404 handler
@@ -68,8 +65,8 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 NES AI backend running on port ${PORT} [production]`);
-  console.log(`✅ Gemini 3 Flash is ready (primary chat model)`);
-  console.log(`✅ Flux 2 Schnell is ready (primary image model via fal.ai)`);
-  console.log(`✅ DeepSeek and Claude as fallbacks for chat`);
-  console.log(`✅ DALL-E 3 as fallback for images (emergency only)`);
+  console.log(`✅ Gemini 3 Flash Preview ready (primary chat model)`);
+  console.log(`✅ DeepSeek and Claude ready as fallbacks`);
+  console.log(`✅ Flux Schnell ready (primary image model)`);
+  console.log(`✅ DALL-E 3 ready as image fallback`);
 });
