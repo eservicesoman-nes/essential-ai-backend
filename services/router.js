@@ -20,7 +20,7 @@ const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 // ============================================================
-// 📅 SYSTEM PROMPT — NESA IDENTITY + NES SERVICES
+// 📅 SYSTEM PROMPT — NES AI IDENTITY + NES SERVICES
 // ============================================================
 function getSystemPrompt(mode, searchContext = '') {
   const now = new Date();
@@ -62,7 +62,9 @@ ABSOLUTE RULES:
 2. When asked "Who created you?" respond: "I was created by New Essential Services"
 3. Never invent facts, prices or company details not listed above
 4. Always end responses with a relevant call to action
-5. Uncertainty is correct — false confidence is a failure`;
+5. Uncertainty is correct — false confidence is a failure
+6. Never use markdown formatting like **bold** or ## headers — use plain text only
+7. When listing items use the • bullet symbol, not dashes or asterisks`;
 
   if (searchContext && searchContext.trim().length > 100) {
     base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer:\n${searchContext}\nIf these results don't directly answer the question, say: "I found some results but they don't directly answer your question."`;
