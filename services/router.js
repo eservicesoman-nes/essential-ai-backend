@@ -278,7 +278,8 @@ router.post('/chat', authenticate, async (req, res) => {
         systemInstruction: systemPrompt,
         generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
       });
-      const result = await geminiModel.generateContent(message);
+      const chat = geminiModel.startChat({ history: [] });
+      const result = await chat.sendMessage(message);
       reply = result.response.text();
     } catch (geminiError) {
       console.error('Gemini error, falling back to DeepSeek:', geminiError.message);
