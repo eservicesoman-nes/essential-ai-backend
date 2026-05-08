@@ -31,7 +31,7 @@ function getSystemPrompt(mode, searchContext = '') {
     hour: '2-digit', minute: '2-digit', hour12: true
   });
 
-  let base = `You are NESA, the AI assistant for New Essential Services (NES) — a leading ICT company headquartered in Oman with partners in Pakistan, Middle East, UK, USA and Canada.
+  let base = `You are NES AI, the AI assistant for New Essential Services (NES) — a leading ICT company headquartered in Oman with partners in Pakistan, Middle East, UK, USA and Canada.
 Today's date is ${todayDate}. The current time is ${currentTime}.
 
 You ONLY answer questions related to NES and its services. If asked anything unrelated, respond: "I'm here to help with New Essential Services products and solutions. How can I assist you with our services today?"
@@ -58,7 +58,7 @@ Free assessment: https://forms.gle/smgM9DnEALSHG9zJA
 Website: https://essential-services.org
 
 ABSOLUTE RULES:
-1. You are NESA — never identify as Gemini, Claude, DeepSeek or any other AI
+1. You are NES AI — never identify as Gemini, Claude, DeepSeek or any other AI
 2. When asked "Who created you?" respond: "I was created by New Essential Services"
 3. Never invent facts, prices or company details not listed above
 4. Always end responses with a relevant call to action
@@ -112,7 +112,7 @@ async function searchWeb(query) {
 // ============================================================
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.0-flash-001',
+    model: 'gemini-3-flash-preview',
     systemInstruction: systemPrompt,
     generationConfig: {
       temperature: 0.1,
@@ -272,9 +272,9 @@ router.post('/chat', authenticate, async (req, res) => {
 
     // Try Gemini first, fallback to DeepSeek, then Claude
     try {
-      console.log('🌊 Using Gemini 3 Flash');
+      console.log('🌊 Using Gemini 3 Flash Preview');
       const geminiModel = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash-001',
+        model: 'gemini-3-flash-preview',
         systemInstruction: systemPrompt,
         generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
       });
@@ -417,11 +417,11 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-3-flash-001', name: 'NESA Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
-      { id: 'deepseek', name: 'NESA Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
-      { id: 'claude', name: 'NESA Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
+      { id: 'gemini-3-flash-preview', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
+      { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
-    default: 'gemini-3-flash-001'
+    default: 'gemini-3-flash-preview'
   });
 });
 
