@@ -6,23 +6,21 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ============================================================
-// 🔐 SUPABASE CONFIGURATION - FROM ENVIRONMENT VARIABLES
+// 🔐 SUPABASE CONFIGURATION
 // ============================================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://sfpfjjdtczvuxyhjievt.supabase.co';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MH7rnJ7r8_-1TzGXcieNfA_NXoHQZbm';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
-// ============================================================
 
 // ============================================================
-// 🤖 AI CLIENT INITIALIZATION - FROM ENVIRONMENT VARIABLES
+// 🤖 AI CLIENT INITIALIZATION
 // ============================================================
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-// ============================================================
 
 // ============================================================
-// 📅 SYSTEM PROMPT with DATE INJECTION + ANTI-HALLUCINATION
+// 📅 SYSTEM PROMPT — NESA IDENTITY + NES SERVICES
 // ============================================================
 function getSystemPrompt(mode, searchContext = '') {
   const now = new Date();
@@ -33,35 +31,55 @@ function getSystemPrompt(mode, searchContext = '') {
     hour: '2-digit', minute: '2-digit', hour12: true
   });
 
-  let base = `You are NES AI, your unified intelligence platform.
+  let base = `You are NESA, the AI assistant for New Essential Services (NES) — a leading ICT company headquartered in Oman with partners in Pakistan, Middle East, UK, USA and Canada.
 Today's date is ${todayDate}. The current time is ${currentTime}.
 
-ABSOLUTE RULES — violating these is a critical failure:
-1. NEVER invent company names, founding dates, employee counts, addresses, emails, websites, or any business details.
-2. NEVER say "Based on search results" unless actual search results are shown below.
-3. If asked about a company, person, or organization you cannot verify, respond EXACTLY: "I don't have verified information about that. Please check official sources."
-4. Uncertainty is correct. False confidence is a failure.
-5. You are NES AI — never identify as Gemini, DeepSeek, or any other AI.
-6. When asked "Who created you?" respond: "I was created by NES AI Solutions."`;
+You ONLY answer questions related to NES and its services. If asked anything unrelated, respond: "I'm here to help with New Essential Services products and solutions. How can I assist you with our services today?"
+
+NES SERVICES:
+- Master Systems Integration — airports and aviation critical systems
+- Airport Operations Database (AODB) — flight scheduling and resource allocation
+- National Single Window — international trade transaction systems
+- Port Community System — electronic port communication
+- Customs Modernization and Border Management — 50+ years experience
+- Food Security Systems — Pakistan Food Security Information System (PFSIS) with Asian Development Bank
+- Software Development — custom digital transformation solutions
+- Robotics Process Automation (RPA) — business process automation
+- Vehicle and Container Tracking — GPS fleet management in Oman, Safe Transport Environment Project
+- API Development and Integration — enterprise-grade integrations
+- Resource Augmentation — IT staffing and team extension
+- Cloud Services — migration, security, optimization, disaster recovery
+- Application Modernization — reducing operational resources, improving uptime
+- Managed Services — monitoring, incident management, backup
+- NES AI Platform — AI chatbots, automation workflows, AI receptionists, lead generation, social media automation, CEO assistant tools
+
+CONTACT: office@essential-services.org
+Free assessment: https://forms.gle/smgM9DnEALSHG9zJA
+Website: https://essential-services.org
+
+ABSOLUTE RULES:
+1. You are NESA — never identify as Gemini, Claude, DeepSeek or any other AI
+2. When asked "Who created you?" respond: "I was created by New Essential Services"
+3. Never invent facts, prices or company details not listed above
+4. Always end responses with a relevant call to action
+5. Uncertainty is correct — false confidence is a failure`;
 
   if (searchContext && searchContext.trim().length > 100) {
-    base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer:
-${searchContext}
-If these results don't directly answer the question, say: "I found some results but they don't directly answer your question."`;
+    base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer:\n${searchContext}\nIf these results don't directly answer the question, say: "I found some results but they don't directly answer your question."`;
   } else {
-    base += `\n\nNo search results available. Answer only from verified training knowledge. For unknown companies or people, admit you cannot verify them.`;
+    base += `\n\nNo search results available. Answer only from the NES service knowledge above.`;
   }
 
   return base;
 }
 
 // ============================================================
-// 🔍 TAVILY WEB SEARCH with SCORE FILTERING
+// 🔍 TAVILY WEB SEARCH WITH SCORE FILTERING
 // ============================================================
 async function searchWeb(query) {
   try {
     const response = await fetch('https://api.tavily.com/search', {
-      method: 'POST',  // ✅ Fixed: standard colon, not full-width colon
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         api_key: process.env.TAVILY_API_KEY,
@@ -75,8 +93,6 @@ async function searchWeb(query) {
     if (!response.ok) return { context: '', sources: [] };
 
     const data = await response.json();
-
-    // Only use results with score > 0.5
     const goodResults = (data.results || []).filter(r => (r.score || 0) > 0.5);
     if (goodResults.length === 0) return { context: '', sources: [] };
 
@@ -92,11 +108,11 @@ async function searchWeb(query) {
 }
 
 // ============================================================
-// 📧 GEMINI 3 FLASH CALL (CORRECT MODEL)
+// 🌊 GEMINI CALL
 // ============================================================
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-001',           // ✅ CORRECT STABLE MODEL
+    model: 'gemini-3-flash-001',
     systemInstruction: systemPrompt,
     generationConfig: {
       temperature: 0.1,
@@ -121,13 +137,8 @@ async function callGemini(message, history, systemPrompt) {
 // ============================================================
 // 🔵 DEEPSEEK FALLBACK
 // ============================================================
-async function callDeepSeek(messages, webSearch = false) {
-  let systemContent = `You are NES AI, your unified intelligence platform.
-Today's date is ${new Date().toLocaleDateString()}.
-Never invent facts or companies. If unsure, say you don't know.`;
-  if (webSearch) systemContent += ` You have access to live web search. Use it for current information.`;
-
-  const deepseekMessages = [{ role: 'system', content: systemContent }, ...messages];
+async function callDeepSeek(messages, systemPrompt) {
+  const deepseekMessages = [{ role: 'system', content: systemPrompt }, ...messages];
 
   const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
@@ -149,16 +160,11 @@ Never invent facts or companies. If unsure, say you don't know.`;
 }
 
 // ============================================================
-// 🟣 CLAUDE FALLBACK (CORRECT MODEL)
+// 🟣 CLAUDE FALLBACK
 // ============================================================
-async function callClaude(messages, webSearch = false) {
-  let systemPrompt = `You are NES AI, your unified intelligence platform.
-Today's date is ${new Date().toLocaleDateString()}.
-Never invent facts or companies. If unsure, say you don't know.`;
-  if (webSearch) systemPrompt += ` You have access to live web search. Use it for current information.`;
-
+async function callClaude(messages, systemPrompt) {
   const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',    // ✅ CORRECT CURRENT MODEL
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 4000,
     temperature: 0.1,
     system: systemPrompt,
@@ -219,7 +225,7 @@ async function authenticate(req, res, next) {
 }
 
 // ============================================================
-// 📍 CHAT ENDPOINT with CORRECT GEMINI MODEL
+// 📍 CHAT ENDPOINT
 // ============================================================
 router.post('/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
@@ -233,7 +239,7 @@ router.post('/chat', authenticate, async (req, res) => {
 
     // Check usage limits (Free: 50/day)
     const today = new Date().toISOString().split('T')[0];
-    const { data: usage, error: usageError } = await supabase
+    const { data: usage } = await supabase
       .from('usage')
       .select('chats_used')
       .eq('user_id', req.user.id)
@@ -256,7 +262,6 @@ router.post('/chat', authenticate, async (req, res) => {
     let sources = [];
     let searchContext = '';
 
-    // Fetch web search results if enabled
     if (webSearch && ['chat', 'deepcore'].includes(mode)) {
       const searchResult = await searchWeb(message);
       searchContext = searchResult.context;
@@ -265,53 +270,30 @@ router.post('/chat', authenticate, async (req, res) => {
 
     const systemPrompt = getSystemPrompt(mode, searchContext);
 
-    // Try Gemini first (using correct model)
-    if (model === 'gemini-3-flash-001' || model === 'gemini-3.1-flash' || !model) {
+    // Try Gemini first, fallback to DeepSeek, then Claude
+    try {
       console.log('🌊 Using Gemini 3 Flash');
+      const geminiModel = genAI.getGenerativeModel({
+        model: 'gemini-3-flash-001',
+        systemInstruction: systemPrompt,
+        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+      });
+      const result = await geminiModel.generateContent(message);
+      reply = result.response.text();
+    } catch (geminiError) {
+      console.error('Gemini error, falling back to DeepSeek:', geminiError.message);
       try {
-        const geminiModel = genAI.getGenerativeModel({
-          model: 'gemini-3-flash-001',
-          systemInstruction: systemPrompt,
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
-        });
-        const result = await geminiModel.generateContent(message);
-        reply = result.response.text();
-      } catch (geminiError) {
-        console.error('Gemini error, falling back to DeepSeek:', geminiError);
-        reply = await callDeepSeek(messages, webSearch);
-      }
-    } else if (model === 'deepseek') {
-      console.log('🔵 Using DeepSeek');
-      reply = await callDeepSeek(messages, webSearch);
-    } else if (model === 'claude') {
-      console.log('🟣 Using Claude');
-      reply = await callClaude(messages, webSearch);
-    } else {
-      // Default: try Gemini
-      console.log('🌊 Trying Gemini 3 Flash (default)');
-      try {
-        const geminiModel = genAI.getGenerativeModel({
-          model: 'gemini-3-flash-001',
-          systemInstruction: systemPrompt,
-          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
-        });
-        const result = await geminiModel.generateContent(message);
-        reply = result.response.text();
-      } catch (geminiError) {
-        console.log('Gemini unavailable, falling back to DeepSeek');
-        try {
-          reply = await callDeepSeek(messages, webSearch);
-        } catch (deepseekError) {
-          console.log('DeepSeek unavailable, falling back to Claude');
-          reply = await callClaude(messages, webSearch);
-        }
+        reply = await callDeepSeek(messages, systemPrompt);
+      } catch (deepseekError) {
+        console.error('DeepSeek error, falling back to Claude:', deepseekError.message);
+        reply = await callClaude(messages, systemPrompt);
       }
     }
 
     await incrementUsage(req.user.id, 'chat');
 
     const duration = Date.now() - startTime;
-    console.log(`Chat request completed in ${duration}ms`);
+    console.log(`Chat completed in ${duration}ms`);
 
     res.json({ reply, sources, usage: { remaining: limit - (chatsUsed + 1) } });
 
@@ -322,7 +304,7 @@ router.post('/chat', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 📍 IMAGE GENERATION ENDPOINT - FLUX + DALL-E FALLBACK
+// 📍 IMAGE GENERATION — FLUX + DALL-E FALLBACK
 // ============================================================
 router.post('/image', authenticate, async (req, res) => {
   try {
@@ -332,9 +314,8 @@ router.post('/image', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    // Check usage limits (Free: 3/day)
     const today = new Date().toISOString().split('T')[0];
-    const { data: usage, error: usageError } = await supabase
+    const { data: usage } = await supabase
       .from('usage')
       .select('images_used')
       .eq('user_id', req.user.id)
@@ -352,10 +333,8 @@ router.post('/image', authenticate, async (req, res) => {
     let revisedPrompt = '';
     let modelUsed = 'flux-schnell';
 
-    // Try Flux Schnell first
     try {
       console.log('🎨 Generating image with Flux Schnell');
-
       const falResponse = await fetch('https://fal.run/fal-ai/flux/schnell', {
         method: 'POST',
         headers: {
@@ -372,7 +351,6 @@ router.post('/image', authenticate, async (req, res) => {
       });
 
       if (!falResponse.ok) throw new Error(`Flux API error: ${falResponse.status}`);
-
       const falData = await falResponse.json();
       imageUrl = falData.images[0].url;
       revisedPrompt = prompt;
@@ -381,7 +359,6 @@ router.post('/image', authenticate, async (req, res) => {
     } catch (fluxError) {
       console.error('Flux error, falling back to DALL-E 3:', fluxError.message);
       modelUsed = 'dall-e-3';
-
       const dalleResponse = await openai.images.generate({
         model: 'dall-e-3',
         prompt: prompt,
@@ -389,15 +366,13 @@ router.post('/image', authenticate, async (req, res) => {
         size: '1024x1024',
         quality: 'standard'
       });
-
       imageUrl = dalleResponse.data[0].url;
       revisedPrompt = dalleResponse.data[0].revised_prompt;
       console.log('✅ DALL-E 3 fallback image generated');
     }
 
     await incrementUsage(req.user.id, 'image');
-
-    res.json({ url: imageUrl, revisedPrompt: revisedPrompt, model: modelUsed, usage: { remaining: limit - (imagesUsed + 1) } });
+    res.json({ url: imageUrl, revisedPrompt, model: modelUsed, usage: { remaining: limit - (imagesUsed + 1) } });
 
   } catch (error) {
     console.error('Image generation error:', error);
@@ -410,13 +385,11 @@ router.post('/image', authenticate, async (req, res) => {
 // ============================================================
 router.get('/usage', authenticate, async (req, res) => {
   try {
-    const userId = req.user.id;
     const today = new Date().toISOString().split('T')[0];
-
     let { data: usage, error } = await supabase
       .from('usage')
       .select('chats_used, images_used, docs_used')
-      .eq('user_id', userId)
+      .eq('user_id', req.user.id)
       .eq('date', today)
       .single();
 
@@ -438,14 +411,14 @@ router.get('/usage', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 📍 GET AVAILABLE MODELS (UPDATED)
+// 📍 GET AVAILABLE MODELS
 // ============================================================
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-3-flash-001', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
-      { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
-      { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
+      { id: 'gemini-3-flash-001', name: 'NESA Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'deepseek', name: 'NESA Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
+      { id: 'claude', name: 'NESA Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
     default: 'gemini-3-flash-001'
   });
