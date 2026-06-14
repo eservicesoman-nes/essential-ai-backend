@@ -272,24 +272,41 @@ router.post('/chat', authenticate, async (req, res) => {
 
     const systemPrompt = getSystemPrompt(mode, searchContext);
 
-    // Try Gemini first, fallback to DeepSeek, then Claude
-    try {
-      console.log('🌊 Using Gemini 3 Flash Preview');
-      const geminiModel = genAI.getGenerativeModel({
-        model: 'gemini-3-flash-preview',
-        systemInstruction: systemPrompt,
-        generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
-      });
-      const chat = geminiModel.startChat({ history: [] });
-      const result = await chat.sendMessage(message);
-      reply = result.response.text();
-    } catch (geminiError) {
-      console.error('Gemini error, falling back to DeepSeek:', geminiError.message);
+    // Docs mode: text already extracted client-side (PDF/DOCX/XLSX/TXT all read as plain text in-browser),
+    // so DeepSeek handles it just as well as Gemini. Try DeepSeek first for docs, fallback to Gemini, then Claude.
+    // For all other modes, keep Gemini first (multimodal/web-search aware), fallback to DeepSeek, then Claude.
+    if (mode === 'docs') {
       try {
+        console.log('🔵 Using DeepSeek (docs mode)');
         reply = await callDeepSeek(messages, systemPrompt);
       } catch (deepseekError) {
-        console.error('DeepSeek error, falling back to Claude:', deepseekError.message);
-        reply = await callClaude(messages, systemPrompt);
+        console.error('DeepSeek error, falling back to Gemini:', deepseekError.message);
+        try {
+          reply = await callGemini(message, history, systemPrompt);
+        } catch (geminiError) {
+          console.error('Gemini error, falling back to Claude:', geminiError.message);
+          reply = await callClaude(messages, systemPrompt);
+        }
+      }
+    } else {
+      try {
+        console.log('🌊 Using Gemini 3 Flash Preview');
+        const geminiModel = genAI.getGenerativeModel({
+          model: 'gemini-3-flash-preview',
+          systemInstruction: systemPrompt,
+          generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
+        });
+        const chat = geminiModel.startChat({ history: [] });
+        const result = await chat.sendMessage(message);
+        reply = result.response.text();
+      } catch (geminiError) {
+        console.error('Gemini error, falling back to DeepSeek:', geminiError.message);
+        try {
+          reply = await callDeepSeek(messages, systemPrompt);
+        } catch (deepseekError) {
+          console.error('DeepSeek error, falling back to Claude:', deepseekError.message);
+          reply = await callClaude(messages, systemPrompt);
+        }
       }
     }
 
