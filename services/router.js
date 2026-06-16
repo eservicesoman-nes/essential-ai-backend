@@ -530,10 +530,18 @@ router.get('/usage', authenticate, async (req, res) => {
       throw error;
     }
 
+    const credits = await getOrCreateImageCredits(req.user.id);
+    const trialActive = credits.trial_ends_at && new Date(credits.trial_ends_at) > new Date();
+
     res.json({
       chats: usage.chats_used || 0,
       images: usage.images_used || 0,
-      docs: usage.docs_used || 0
+      docs: usage.docs_used || 0,
+      imageCredits: {
+        dailyFreeRemaining: Math.max(0, 3 - (usage.images_used || 0)),
+        trialCreditsRemaining: trialActive ? credits.trial_credits_remaining : 0,
+        balance: credits.balance
+      }
     });
   } catch (error) {
     console.error('Usage error:', error);
