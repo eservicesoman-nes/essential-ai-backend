@@ -324,7 +324,81 @@ router.post('/chat', authenticate, async (req, res) => {
 });
 
 // ============================================================
-// 📍 IMAGE GENERATION — FLUX + DALL-E FALLBACK
+// 🪙 IMAGE CREDITS HELPERS
+// ============================================================
+async function getOrCreateImageCredits(userId) {
+  const { data: existing } = await supabase
+    .from('image_credits')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (existing) return existing;
+
+  const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: created } = await supabase
+    .from('image_credits')
+    .insert({ user_id: userId, balance: 0, trial_credits_remaining: 10, trial_ends_at: trialEndsAt })
+    .select()
+    .single();
+
+  await logImageCreditTransaction(userId, 'trial_grant', 10, 10, null, 'Initial 7-day trial credit grant');
+  return created;
+}
+
+async function logImageCreditTransaction(userId, type, amount, balanceAfter, thawaniReference = null, notes = null) {
+  await supabase.from('image_credit_transactions').insert({
+    user_id: userId,
+    type,
+    amount,
+    balance_after: balanceAfter,
+    thawani_reference: thawaniReference,
+    notes
+  });
+}
+
+// Deducts one credit, preferring trial credits (while trial is active) over the paid balance.
+// Returns { ok: true } if a credit was available and deducted, or { ok: false } if both are exhausted.
+async function deductImageCredit(userId, credits) {
+  const trialActive = credits.trial_ends_at && new Date(credits.trial_ends_at) > new Date();
+
+  if (trialActive && credits.trial_credits_remaining > 0) {
+    const newTrialRemaining = credits.trial_credits_remaining - 1;
+    await supabase.from('image_credits').update({ trial_credits_remaining: newTrialRemaining, updated_at: new Date().toISOString() }).eq('user_id', userId);
+    await logImageCreditTransaction(userId, 'generation', -1, credits.balance, null, 'Trial credit used');
+    return { ok: true, source: 'trial' };
+  }
+
+  if (credits.balance > 0) {
+    const newBalance = credits.balance - 1;
+    await supabase.from('image_credits').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', userId);
+    await logImageCreditTransaction(userId, 'generation', -1, newBalance, null, 'Paid credit used');
+    return { ok: true, source: 'balance' };
+  }
+
+  return { ok: false };
+}
+
+// Uploads a base64-encoded image (from GPT Image 2) to Supabase Storage and returns a public URL.
+async function uploadBase64ImageToStorage(base64Data, userId) {
+  const buffer = Buffer.from(base64Data, 'base64');
+  const filename = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.png`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('generated-images')
+    .upload(filename, buffer, { contentType: 'image/png' });
+
+  if (uploadError) throw new Error(`Storage upload failed: ${uploadError.message}`);
+
+  const { data: publicUrlData } = supabase.storage
+    .from('generated-images')
+    .getPublicUrl(filename);
+
+  return publicUrlData.publicUrl;
+}
+
+// ============================================================
+// 📍 IMAGE GENERATION — FLUX + GPT IMAGE 2 FALLBACK, PAYG CREDITS
 // ============================================================
 router.post('/image', authenticate, async (req, res) => {
   try {
@@ -343,10 +417,26 @@ router.post('/image', authenticate, async (req, res) => {
       .single();
 
     const imagesUsed = usage?.images_used || 0;
-    const limit = 3;
+    const dailyLimit = 3;
+    const withinDailyAllowance = imagesUsed < dailyLimit;
 
-    if (imagesUsed >= limit) {
-      return res.status(429).json({ error: 'Daily image limit reached', limit, used: imagesUsed });
+    let creditSourceUsed = null;
+    let credits = null;
+
+    if (!withinDailyAllowance) {
+      // Daily free allowance exhausted — fall back to trial/paid credits.
+      credits = await getOrCreateImageCredits(req.user.id);
+      const deduction = await deductImageCredit(req.user.id, credits);
+      if (!deduction.ok) {
+        return res.status(429).json({
+          error: 'Daily image limit reached and no credits remaining',
+          limit: dailyLimit,
+          used: imagesUsed,
+          creditsBalance: credits.balance,
+          trialCreditsRemaining: credits.trial_credits_remaining
+        });
+      }
+      creditSourceUsed = deduction.source;
     }
 
     let imageUrl = '';
@@ -377,22 +467,43 @@ router.post('/image', authenticate, async (req, res) => {
       console.log('✅ Flux Schnell image generated');
 
     } catch (fluxError) {
-      console.error('Flux error, falling back to DALL-E 3:', fluxError.message);
-      modelUsed = 'dall-e-3';
-      const dalleResponse = await openai.images.generate({
-        model: 'dall-e-3',
+      console.error('Flux error, falling back to GPT Image 2:', fluxError.message);
+      modelUsed = 'gpt-image-2';
+      const gptImageResponse = await openai.images.generate({
+        model: 'gpt-image-2',
         prompt: prompt,
         n: 1,
-        size: '1024x1024',
-        quality: 'standard'
+        size: '1024x1024'
       });
-      imageUrl = dalleResponse.data[0].url;
-      revisedPrompt = dalleResponse.data[0].revised_prompt;
-      console.log('✅ DALL-E 3 fallback image generated');
+      const b64Data = gptImageResponse.data[0].b64_json;
+      imageUrl = await uploadBase64ImageToStorage(b64Data, req.user.id);
+      revisedPrompt = prompt;
+      console.log('✅ GPT Image 2 fallback image generated and uploaded');
     }
 
-    await incrementUsage(req.user.id, 'image');
-    res.json({ url: imageUrl, revisedPrompt, model: modelUsed, usage: { remaining: limit - (imagesUsed + 1) } });
+    if (withinDailyAllowance) {
+      await incrementUsage(req.user.id, 'image');
+    }
+
+    const responsePayload = {
+      url: imageUrl,
+      revisedPrompt,
+      model: modelUsed,
+      usage: { remaining: withinDailyAllowance ? dailyLimit - (imagesUsed + 1) : 0 }
+    };
+
+    if (creditSourceUsed) {
+      const { data: latestCredits } = await supabase
+        .from('image_credits')
+        .select('balance, trial_credits_remaining')
+        .eq('user_id', req.user.id)
+        .single();
+      responsePayload.creditsUsed = creditSourceUsed;
+      responsePayload.creditsBalance = latestCredits?.balance ?? 0;
+      responsePayload.trialCreditsRemaining = latestCredits?.trial_credits_remaining ?? 0;
+    }
+
+    res.json(responsePayload);
 
   } catch (error) {
     console.error('Image generation error:', error);
