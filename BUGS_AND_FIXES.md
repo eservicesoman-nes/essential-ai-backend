@@ -110,6 +110,18 @@ Each entry should include: date, symptom, root cause, fix, and the general lesso
 
 ---
 
+## 2026-06-17/18 — Daily CEO Briefing silently stopped posting for 5 days
+
+**Symptom:** The `#ceo` Rocket.Chat channel had no "GOOD MORNING" briefing since June 13 — five days of silence, with no error visible anywhere in Rocket.Chat itself.
+
+**Root cause:** Two separate, stacked bugs in the "NES - Daily CEO Briefing" n8n workflow. (1) The "Telegram CEO Briefing" node used Telegram's legacy Markdown parse mode. Any unescaped `*`, `_`, `[`, `]`, or backtick character inside a lead/booking title (free text, never sanitized) caused Telegram's API to reject the whole message with `Bad Request: can't parse entities`. This node ran in parallel with "Post to #ceo," both fed by the same upstream node, and the Telegram failure was preventing the parallel Rocket.Chat branch from completing the run. (2) Independently, the Rocket.Chat Personal Access Token tied to the bot account (user ID `KHGpqcZYRTXyAqN9x`, n8n credential "Rocket account") had been invalidated with no warning anywhere in the UI — confirmed via a direct curl test against the Rocket.Chat API returning an auth error even though the token was exactly what n8n had stored.
+
+**Fix:** Rebuilt the workflow with a new "Build Briefing Text" Code node that strips markdown special characters from all free-text fields before building two separate message strings: a Markdown-formatted version for Rocket.Chat/Supabase, and a fully plain-text version for Telegram with zero special characters, so a future stray character can never break it again. Added `continueOnFail: true` to the Telegram node so a future failure there can never again silently block the Rocket.Chat branch. Also fixed a separate latent issue found along the way: the workflow was fetching weather data from `wttr.in/Muscat` but never actually using it in the message text — now genuinely included in both versions. Separately, generated a fresh Rocket.Chat Personal Access Token (via Account → Personal Access Tokens while logged in as nesadmin — discovered nesadmin and the bot account share the same underlying Rocket.Chat user ID) and updated the "Rocket account" credential in n8n. Backed up the new token in `.env` (`ROCKETCHAT_USER_ID`, `ROCKETCHAT_AUTH_TOKEN`, `ROCKETCHAT_DOMAIN`) for recovery reference, matching the existing pattern for the Telegram bot token.
+
+**General lesson:** Personal Access Tokens in Rocket.Chat have no built-in expiry but can still be silently invalidated with zero warning surfaced anywhere in the destination app — the channel just goes quiet. When a scheduled workflow silently stops producing output, check the workflow tool's own Executions log directly rather than assuming the destination app would show an error. Also: never let two parallel branches in a workflow implicitly depend on each other succeeding — a node erroring in one branch can prevent a sibling branch from completing unless `continueOnFail` is explicitly set on the branch that's allowed to fail safely.
+
+---
+
 ## Template for new entries
 
 ```
