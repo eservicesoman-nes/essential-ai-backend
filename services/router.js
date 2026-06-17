@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 const OpenAI = require('openai');
 const Anthropic = require('@anthropic-ai/sdk');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -10,12 +11,12 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 // ============================================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://sfpfjjdtczvuxyhjievt.supabase.co';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MH7rnJ7r8_-1TzGXcieNfA_NXoHQZbm';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(supabaseUrl, supabaseAnonKey, { realtime: { transport: ws } });
 
 // Service-role client, used ONLY for admin operations (e.g. creating auth
 // users during client onboarding) that the anon key cannot perform.
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabaseAdmin = supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+const supabaseAdmin = supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey, { realtime: { transport: ws } }) : null;
 
 // ============================================================
 // 🤖 AI CLIENT INITIALIZATION
