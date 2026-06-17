@@ -335,14 +335,12 @@ async function getOrCreateImageCredits(userId) {
 
   if (existing) return existing;
 
-  const trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const { data: created } = await supabase
     .from('image_credits')
-    .insert({ user_id: userId, balance: 0, trial_credits_remaining: 10, trial_ends_at: trialEndsAt })
+    .insert({ user_id: userId, balance: 0 })
     .select()
     .single();
 
-  await logImageCreditTransaction(userId, 'trial_grant', 10, 10, null, 'Initial 7-day trial credit grant');
   return created;
 }
 
@@ -357,18 +355,9 @@ async function logImageCreditTransaction(userId, type, amount, balanceAfter, tha
   });
 }
 
-// Deducts one credit, preferring trial credits (while trial is active) over the paid balance.
-// Returns { ok: true } if a credit was available and deducted, or { ok: false } if both are exhausted.
+// Deducts one credit from the paid balance. Returns { ok: true } if a
+// credit was available and deducted, or { ok: false } if balance is empty.
 async function deductImageCredit(userId, credits) {
-  const trialActive = credits.trial_ends_at && new Date(credits.trial_ends_at) > new Date();
-
-  if (trialActive && credits.trial_credits_remaining > 0) {
-    const newTrialRemaining = credits.trial_credits_remaining - 1;
-    await supabase.from('image_credits').update({ trial_credits_remaining: newTrialRemaining, updated_at: new Date().toISOString() }).eq('user_id', userId);
-    await logImageCreditTransaction(userId, 'generation', -1, credits.balance, null, 'Trial credit used');
-    return { ok: true, source: 'trial' };
-  }
-
   if (credits.balance > 0) {
     const newBalance = credits.balance - 1;
     await supabase.from('image_credits').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', userId);
@@ -424,7 +413,7 @@ router.post('/image', authenticate, async (req, res) => {
     let credits = null;
 
     if (!withinDailyAllowance) {
-      // Daily free allowance exhausted — fall back to trial/paid credits.
+      // Daily free allowance exhausted — fall back to paid PAYG credits.
       credits = await getOrCreateImageCredits(req.user.id);
       const deduction = await deductImageCredit(req.user.id, credits);
       if (!deduction.ok) {
@@ -432,8 +421,7 @@ router.post('/image', authenticate, async (req, res) => {
           error: 'Daily image limit reached and no credits remaining',
           limit: dailyLimit,
           used: imagesUsed,
-          creditsBalance: credits.balance,
-          trialCreditsRemaining: credits.trial_credits_remaining
+          creditsBalance: credits.balance
         });
       }
       creditSourceUsed = deduction.source;
@@ -495,12 +483,11 @@ router.post('/image', authenticate, async (req, res) => {
     if (creditSourceUsed) {
       const { data: latestCredits } = await supabase
         .from('image_credits')
-        .select('balance, trial_credits_remaining')
+        .select('balance')
         .eq('user_id', req.user.id)
         .single();
       responsePayload.creditsUsed = creditSourceUsed;
       responsePayload.creditsBalance = latestCredits?.balance ?? 0;
-      responsePayload.trialCreditsRemaining = latestCredits?.trial_credits_remaining ?? 0;
     }
 
     res.json(responsePayload);
@@ -531,7 +518,6 @@ router.get('/usage', authenticate, async (req, res) => {
     }
 
     const credits = await getOrCreateImageCredits(req.user.id);
-    const trialActive = credits.trial_ends_at && new Date(credits.trial_ends_at) > new Date();
 
     res.json({
       chats: usage.chats_used || 0,
@@ -539,7 +525,6 @@ router.get('/usage', authenticate, async (req, res) => {
       docs: usage.docs_used || 0,
       imageCredits: {
         dailyFreeRemaining: Math.max(0, 3 - (usage.images_used || 0)),
-        trialCreditsRemaining: trialActive ? credits.trial_credits_remaining : 0,
         balance: credits.balance
       }
     });
