@@ -12,6 +12,11 @@ const supabaseUrl = process.env.SUPABASE_URL || 'https://sfpfjjdtczvuxyhjievt.su
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_MH7rnJ7r8_-1TzGXcieNfA_NXoHQZbm';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Service-role client, used ONLY for admin operations (e.g. creating auth
+// users during client onboarding) that the anon key cannot perform.
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAdmin = supabaseServiceKey ? createClient(supabaseUrl, supabaseServiceKey) : null;
+
 // ============================================================
 // 🤖 AI CLIENT INITIALIZATION
 // ============================================================
@@ -576,6 +581,72 @@ router.get('/models', authenticate, async (req, res) => {
     ],
     default: 'gemini-3-flash-preview'
   });
+});
+
+// ============================================================
+// 📍 CREATE LOGIN FOR CLIENT (onboarding) — links clients.user_id
+// ============================================================
+router.post('/clients/:clientId/create-login', authenticate, async (req, res) => {
+  try {
+    if (!supabaseAdmin) {
+      return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    }
+
+    const { clientId } = req.params;
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, email, user_id, name')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (client.user_id) {
+      return res.status(400).json({ error: 'This client already has a linked login', user_id: client.user_id });
+    }
+
+    if (!client.email) {
+      return res.status(400).json({ error: 'Client has no email on file — add one before creating a login' });
+    }
+
+    // Generate a random temporary password the client will be told to change.
+    const tempPassword = 'Nes' + Math.random().toString(36).slice(2, 8) + '!' + Math.floor(Math.random() * 1000);
+
+    const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+      email: client.email,
+      password: tempPassword,
+      email_confirm: true
+    });
+
+    if (createError) {
+      // Most common case: an auth account with this email already exists
+      // but was never linked. Surface a clear message rather than a raw error.
+      return res.status(400).json({ error: `Could not create login: ${createError.message}` });
+    }
+
+    const { error: linkError } = await supabase
+      .from('clients')
+      .update({ user_id: newUser.user.id })
+      .eq('id', clientId);
+
+    if (linkError) {
+      return res.status(500).json({ error: `Login created but linking failed: ${linkError.message}` });
+    }
+
+    res.json({
+      success: true,
+      user_id: newUser.user.id,
+      email: client.email,
+      temp_password: tempPassword
+    });
+
+  } catch (error) {
+    console.error('Create login error:', error);
+    res.status(500).json({ error: 'Failed to create login' });
+  }
 });
 
 module.exports = router;
