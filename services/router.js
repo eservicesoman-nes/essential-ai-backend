@@ -700,3 +700,142 @@ router.post('/clients/:clientId/grant-credits', authenticate, async (req, res) =
 });
 
 module.exports = router;
+
+// ============================================================
+// 📍 CLIENT PAYMENTS — record + history + lifetime total
+// ============================================================
+
+// Record a payment or adjustment (manual entry, e.g. cash/bank transfer/rebate).
+router.post('/clients/:clientId/payments', authenticate, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { type, method, amount, note, billing_period } = req.body;
+
+    if (!['payment', 'adjustment'].includes(type)) {
+      return res.status(400).json({ error: 'type must be "payment" or "adjustment"' });
+    }
+    if (!['thawani', 'cash', 'bank_transfer', 'rebate', 'other'].includes(method)) {
+      return res.status(400).json({ error: 'Invalid method' });
+    }
+
+    const parsedAmount = parseFloat(amount);
+    if (!parsedAmount || parsedAmount <= 0) {
+      return res.status(400).json({ error: 'A positive amount is required' });
+    }
+
+    // GUARD: manual entries must always carry a note, so there's always a
+    // reason on record for why someone recorded this by hand.
+    if (!note || !note.trim()) {
+      return res.status(400).json({ error: 'A note is required for manual entries (e.g. receipt #, who received it)' });
+    }
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, name')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    // GUARD: block rebates/adjustments from pushing the lifetime total negative.
+    if (type === 'adjustment') {
+      const { data: existing } = await supabase
+        .from('client_payments')
+        .select('type, amount')
+        .eq('client_id', clientId);
+      const currentTotal = (existing || []).reduce((sum, p) => sum + (p.type === 'adjustment' ? -Math.abs(p.amount) : p.amount), 0);
+      if (parsedAmount > currentTotal) {
+        return res.status(400).json({ error: `Rebate of ${parsedAmount} would exceed the client's current lifetime total of ${currentTotal.toFixed(2)} — reduce the amount` });
+      }
+    }
+
+    // GUARD: warn (not block) if a payment already exists for this billing period.
+    let duplicateWarning = null;
+    if (billing_period && type === 'payment') {
+      const { data: existingForPeriod } = await supabase
+        .from('client_payments')
+        .select('id, method, source')
+        .eq('client_id', clientId)
+        .eq('billing_period', billing_period)
+        .eq('type', 'payment');
+      if (existingForPeriod && existingForPeriod.length > 0) {
+        duplicateWarning = `This billing period already has ${existingForPeriod.length} payment(s) recorded — entry added anyway`;
+      }
+    }
+
+    const { data: inserted, error: insertError } = await supabase
+      .from('client_payments')
+      .insert({
+        client_id: clientId,
+        type,
+        method,
+        source: 'manual',
+        amount: parsedAmount,
+        note: note.trim(),
+        billing_period: billing_period || null,
+        created_by: req.user.id
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      return res.status(500).json({ error: `Failed to record entry: ${insertError.message}` });
+    }
+
+    res.json({ success: true, entry: inserted, warning: duplicateWarning });
+
+  } catch (error) {
+    console.error('Record payment error:', error);
+    res.status(500).json({ error: 'Failed to record payment' });
+  }
+});
+
+// Fetch payment history + lifetime total (plan payments/adjustments + image credit purchases).
+router.get('/clients/:clientId/payments', authenticate, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, user_id')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    const { data: payments } = await supabase
+      .from('client_payments')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+
+    let creditPurchases = [];
+    if (client.user_id) {
+      const { data: txns } = await supabase
+        .from('image_credit_transactions')
+        .select('*')
+        .eq('user_id', client.user_id)
+        .eq('type', 'purchase')
+        .order('created_at', { ascending: false });
+      creditPurchases = txns || [];
+    }
+
+    const planTotal = (payments || []).reduce((sum, p) => sum + (p.type === 'adjustment' ? -Math.abs(p.amount) : p.amount), 0);
+    // Note: image credit purchases are tracked in credit units, not OMR, so they
+    // contribute to history but are not currently summed into the OMR lifetime total.
+
+    res.json({
+      payments: payments || [],
+      creditPurchases,
+      lifetimeTotalOMR: Math.max(0, planTotal)
+    });
+
+  } catch (error) {
+    console.error('Fetch payments error:', error);
+    res.status(500).json({ error: 'Failed to fetch payment history' });
+  }
+});
