@@ -699,7 +699,137 @@ router.post('/clients/:clientId/grant-credits', authenticate, async (req, res) =
   }
 });
 
-module.exports = router;
+// ============================================================
+// 📧 EMAIL ROUTES — moved here from the orphaned top-level router.js,
+// which was never mounted by server.js (server.js requires ./services/router
+// only). These routes existed in code but were never live in production.
+// ============================================================
+const { getProviderSettings, testConnection, fetchEmails, sendEmail } = require('./emailService');
+const crypto = require('crypto');
+
+function encryptPassword(text) {
+  const key = Buffer.from(process.env.ENCRYPTION_KEY || 'mOq5P4pmkCGQGH2UfxUCsBLZP2h3XtdWZssZ/jKNlbs=', 'base64');
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  return iv.toString('hex') + ':' + cipher.update(text, 'utf8', 'hex') + cipher.final('hex');
+}
+
+function decryptPassword(text) {
+  const key = Buffer.from(process.env.ENCRYPTION_KEY || 'mOq5P4pmkCGQGH2UfxUCsBLZP2h3XtdWZssZ/jKNlbs=', 'base64');
+  const [ivHex, encrypted] = text.split(':');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
+  return decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8');
+}
+
+// GET /api/email/accounts/:clientId
+router.get('/email/accounts/:clientId', authenticate, async (req, res) => {
+  try {
+    const { data } = await supabase.from('email_accounts').select('id,email_address,provider,imap_server,imap_port,smtp_server,smtp_port,label,is_active,last_synced').eq('client_id', req.params.clientId);
+    res.json({ accounts: data || [] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/email/connect
+router.post('/email/connect', authenticate, async (req, res) => {
+  try {
+    const { client_id, email_address, app_password, provider, label, imap_server, imap_port, smtp_server, smtp_port } = req.body;
+    const settings = getProviderSettings(provider);
+    const account = {
+      email_address,
+      app_password,
+      imap_server: imap_server || settings.imap_server,
+      imap_port: imap_port || settings.imap_port,
+      smtp_server: smtp_server || settings.smtp_server,
+      smtp_port: smtp_port || settings.smtp_port,
+      username: email_address,
+    };
+    await testConnection(account);
+    const encrypted = encryptPassword(app_password);
+    const { data, error } = await supabase.from('email_accounts').insert([{
+      client_id, email_address, app_password: encrypted, provider,
+      label: label || email_address,
+      imap_server: account.imap_server,
+      imap_port: account.imap_port,
+      smtp_server: account.smtp_server,
+      smtp_port: account.smtp_port,
+    }]).select().single();
+    if(error) throw new Error(error.message);
+    res.json({ success: true, account: { id: data.id, email_address, provider, label } });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/email/inbox/:clientId
+router.get('/email/inbox/:clientId', authenticate, async (req, res) => {
+  try {
+    const { data: accounts } = await supabase.from('email_accounts').select('*').eq('client_id', req.params.clientId).eq('is_active', true);
+    if(!accounts || accounts.length === 0) return res.json({ emails: [] });
+    const allEmails = [];
+    for(const account of accounts) {
+      try {
+        account.app_password = decryptPassword(account.app_password);
+        const emails = await fetchEmails(account, 20);
+        emails.forEach(e => { e.account_id = account.id; e.account_email = account.email_address; e.account_label = account.label; });
+        allEmails.push(...emails);
+        await supabase.from('email_accounts').update({ last_synced: new Date().toISOString() }).eq('id', account.id);
+      } catch(e) { console.error('Fetch error for', account.email_address, e.message); }
+    }
+    allEmails.sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
+    res.json({ emails: allEmails.slice(0, 50) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/email/send
+router.post('/email/send', authenticate, async (req, res) => {
+  try {
+    const { account_id, to, subject, body, replyTo } = req.body;
+    const { data: account } = await supabase.from('email_accounts').select('*').eq('id', account_id).single();
+    if(!account) return res.status(404).json({ error: 'Account not found' });
+    account.app_password = decryptPassword(account.app_password);
+    await sendEmail(account, { to, subject, body, replyTo });
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/email/account/:id
+router.delete('/email/account/:id', authenticate, async (req, res) => {
+  try {
+    await supabase.from('email_accounts').delete().eq('id', req.params.id);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/email/body/:accountId/:uid
+router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
+  try {
+    const { data: account } = await supabase.from('email_accounts').select('*').eq('id', req.params.accountId).single();
+    if(!account) return res.status(404).json({ error: 'Account not found' });
+    account.app_password = decryptPassword(account.app_password);
+    const Imap = require('node-imap');
+    const { simpleParser } = require('mailparser');
+    const result = await new Promise((resolve, reject) => {
+      const imap = new Imap({ user:account.username||account.email_address, password:account.app_password, host:account.imap_server, port:account.imap_port||993, tls:true, tlsOptions:{rejectUnauthorized:false}, connTimeout:15000, authTimeout:15000 });
+      imap.once('ready', () => {
+        imap.openBox('INBOX', false, (err) => {
+          if(err){ imap.end(); return reject(err); }
+          const fetch = imap.fetch(req.params.uid, { bodies: [''] });
+          let rawEmail = '';
+          fetch.on('message', (msg) => {
+            msg.on('body', (stream) => {
+              stream.on('data', (c) => rawEmail += c.toString('utf8'));
+            });
+          });
+          fetch.once('error', reject);
+          fetch.once('end', () => { imap.end(); resolve(rawEmail); });
+        });
+      });
+      imap.once('error', reject);
+      imap.connect();
+    });
+    const parsed = await simpleParser(result);
+    const body = parsed.text || parsed.html?.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim() || '';
+    res.json({ body, subject: parsed.subject, from: parsed.from?.text });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ============================================================
 // 📍 CLIENT PAYMENTS — record + history + lifetime total
@@ -839,3 +969,5 @@ router.get('/clients/:clientId/payments', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch payment history' });
   }
 });
+
+module.exports = router;
