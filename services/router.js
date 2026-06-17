@@ -386,6 +386,31 @@ async function uploadBase64ImageToStorage(base64Data, userId) {
   return publicUrlData.publicUrl;
 }
 
+// Determines whether a user's 3/day free image allowance still applies.
+// Looks up the client record linked via clients.user_id. Returns:
+//   { freeAllowanceActive: true }  — full_access_override is on, OR trial_start
+//                                    is null/not yet set, OR trial hasn't expired
+//   { freeAllowanceActive: false } — trial has expired and no override
+// If no client record is linked to this user at all, defaults to TRUE
+// (fail-open) so users without a client record yet aren't unexpectedly blocked.
+async function checkFreeAllowanceActive(userId) {
+  const { data: client } = await supabase
+    .from('clients')
+    .select('trial_start, trial_duration_days, full_access_override')
+    .eq('user_id', userId)
+    .single();
+
+  if (!client) return { freeAllowanceActive: true };
+  if (client.full_access_override) return { freeAllowanceActive: true };
+  if (!client.trial_start) return { freeAllowanceActive: true };
+
+  const trialDays = client.trial_duration_days || 7;
+  const trialEnd = new Date(new Date(client.trial_start).getTime() + trialDays * 24 * 60 * 60 * 1000);
+  const trialExpired = new Date() > trialEnd;
+
+  return { freeAllowanceActive: !trialExpired };
+}
+
 // ============================================================
 // 📍 IMAGE GENERATION — FLUX + GPT IMAGE 2 FALLBACK, PAYG CREDITS
 // ============================================================
@@ -397,6 +422,8 @@ router.post('/image', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
+    const { freeAllowanceActive } = await checkFreeAllowanceActive(req.user.id);
+
     const today = new Date().toISOString().split('T')[0];
     const { data: usage } = await supabase
       .from('usage')
@@ -407,20 +434,21 @@ router.post('/image', authenticate, async (req, res) => {
 
     const imagesUsed = usage?.images_used || 0;
     const dailyLimit = 3;
-    const withinDailyAllowance = imagesUsed < dailyLimit;
+    const withinDailyAllowance = freeAllowanceActive && imagesUsed < dailyLimit;
 
     let creditSourceUsed = null;
     let credits = null;
 
     if (!withinDailyAllowance) {
-      // Daily free allowance exhausted — fall back to paid PAYG credits.
+      // Daily free allowance exhausted OR trial expired — fall back to paid PAYG credits.
       credits = await getOrCreateImageCredits(req.user.id);
       const deduction = await deductImageCredit(req.user.id, credits);
       if (!deduction.ok) {
         return res.status(429).json({
-          error: 'Daily image limit reached and no credits remaining',
+          error: freeAllowanceActive ? 'Daily image limit reached and no credits remaining' : 'Free trial ended — please purchase image credits to continue',
           limit: dailyLimit,
           used: imagesUsed,
+          trialExpired: !freeAllowanceActive,
           creditsBalance: credits.balance
         });
       }
@@ -518,14 +546,16 @@ router.get('/usage', authenticate, async (req, res) => {
     }
 
     const credits = await getOrCreateImageCredits(req.user.id);
+    const { freeAllowanceActive } = await checkFreeAllowanceActive(req.user.id);
 
     res.json({
       chats: usage.chats_used || 0,
       images: usage.images_used || 0,
       docs: usage.docs_used || 0,
       imageCredits: {
-        dailyFreeRemaining: Math.max(0, 3 - (usage.images_used || 0)),
-        balance: credits.balance
+        dailyFreeRemaining: freeAllowanceActive ? Math.max(0, 3 - (usage.images_used || 0)) : 0,
+        balance: credits.balance,
+        freeAllowanceActive
       }
     });
   } catch (error) {
