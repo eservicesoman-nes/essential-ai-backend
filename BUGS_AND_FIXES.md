@@ -84,6 +84,20 @@ Each entry should include: date, symptom, root cause, fix, and the general lesso
 
 ---
 
+## 2026-06-17 — CEO Dashboard Intelligence Feed links going to wrong articles (regression of a May 29 fix)
+
+**Symptom:** Links on CEO Dashboard feed items led to unrelated/wrong articles. This is a regression — `source_url` had already been fixed once before, on 2026-05-29.
+
+**Root cause:** The n8n "Intelligence Feed" workflow's `Code in JavaScript` node determined `source_url` two ways, in order: (1) extract a URL from a `🔗 [link]` line inside the AI's own generated briefing text, or (2) fall back to a substring match between the AI's story title and the original RSS item title (checking if the first 30 characters of one title appeared inside the other). Both paths depend on the AI (Claude Haiku) faithfully reproducing exact text it was given — the verbatim URL, or a title close enough for a naive substring match to succeed. When the AI paraphrased a title more than usual or omitted the `🔗` line on a given run, both paths silently produced an empty string, which the frontend then treated as "find the link yourself" and fell back to scraping random URLs out of the content field.
+
+**Why the original May 29 fix didn't last:** That fix was probabilistic, not deterministic — it worked exactly as long as the AI's free-text output reliably matched the assumptions baked into the parsing code. There was no validation step confirming `source_url` was actually non-empty before insert, so the failure was completely silent: no error, no crash, `ceo_feed` rows just slowly accumulated with `source_url: null` again over time, with nothing flagging it until someone manually noticed wrong links weeks later.
+
+**Fix:** Rewrote the matching logic to never depend on the AI's echoed text for the source URL. It now matches the AI-generated story title against the real RSS item titles (the ones actually fetched from Google News RSS, never touched by the AI) using word-overlap scoring (shared significant words / total words, ≥40% required to accept a match) instead of a fragile substring check. The AI's own `🔗` line is now only a last-resort fallback, not the primary path.
+
+**General lesson:** Any pipeline step that asks an LLM to faithfully echo back exact data it was given (a URL, an ID, an exact title) rather than just reason over it, is a latent reliability bug — LLMs paraphrase by default. Wherever possible, match back to the original structured data instead of parsing the LLM's free-text restatement of it. Also: fields like `source_url` that silently default to an empty string on failure should have a periodic check (e.g. "alert if >X% of this week's feed items have empty source_url") since this class of bug produces no error and can sit unnoticed indefinitely.
+
+---
+
 ## 2026-06-17 — Backend crash-loop after deploying a new Supabase client
 
 **Symptom:** `pm2 describe nes-backend` showed 14 unstable restarts, 0s uptime, immediately after deploying a new feature (the `create-login` endpoint, which introduced a second `supabaseAdmin` Supabase client).
