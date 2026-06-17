@@ -724,7 +724,8 @@ function decryptPassword(text) {
 // GET /api/email/accounts/:clientId
 router.get('/email/accounts/:clientId', authenticate, async (req, res) => {
   try {
-    const { data } = await supabase.from('email_accounts').select('id,email_address,provider,imap_server,imap_port,smtp_server,smtp_port,label,is_active,last_synced').eq('client_id', req.params.clientId);
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    const { data } = await supabaseAdmin.from('email_accounts').select('id,email_address,provider,imap_server,imap_port,smtp_server,smtp_port,label,is_active,last_synced').eq('client_id', req.params.clientId);
     res.json({ accounts: data || [] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -732,6 +733,7 @@ router.get('/email/accounts/:clientId', authenticate, async (req, res) => {
 // POST /api/email/connect
 router.post('/email/connect', authenticate, async (req, res) => {
   try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
     const { client_id, email_address, app_password, provider, label, imap_server, imap_port, smtp_server, smtp_port } = req.body;
     const settings = getProviderSettings(provider);
     const account = {
@@ -745,7 +747,7 @@ router.post('/email/connect', authenticate, async (req, res) => {
     };
     await testConnection(account);
     const encrypted = encryptPassword(app_password);
-    const { data, error } = await supabase.from('email_accounts').insert([{
+    const { data, error } = await supabaseAdmin.from('email_accounts').insert([{
       client_id, email_address, app_password: encrypted, provider,
       label: label || email_address,
       imap_server: account.imap_server,
@@ -761,7 +763,8 @@ router.post('/email/connect', authenticate, async (req, res) => {
 // GET /api/email/inbox/:clientId
 router.get('/email/inbox/:clientId', authenticate, async (req, res) => {
   try {
-    const { data: accounts } = await supabase.from('email_accounts').select('*').eq('client_id', req.params.clientId).eq('is_active', true);
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    const { data: accounts } = await supabaseAdmin.from('email_accounts').select('*').eq('client_id', req.params.clientId).eq('is_active', true);
     if(!accounts || accounts.length === 0) return res.json({ emails: [] });
     const allEmails = [];
     for(const account of accounts) {
@@ -770,7 +773,7 @@ router.get('/email/inbox/:clientId', authenticate, async (req, res) => {
         const emails = await fetchEmails(account, 20);
         emails.forEach(e => { e.account_id = account.id; e.account_email = account.email_address; e.account_label = account.label; });
         allEmails.push(...emails);
-        await supabase.from('email_accounts').update({ last_synced: new Date().toISOString() }).eq('id', account.id);
+        await supabaseAdmin.from('email_accounts').update({ last_synced: new Date().toISOString() }).eq('id', account.id);
       } catch(e) { console.error('Fetch error for', account.email_address, e.message); }
     }
     allEmails.sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
@@ -781,8 +784,9 @@ router.get('/email/inbox/:clientId', authenticate, async (req, res) => {
 // POST /api/email/send
 router.post('/email/send', authenticate, async (req, res) => {
   try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
     const { account_id, to, subject, body, replyTo } = req.body;
-    const { data: account } = await supabase.from('email_accounts').select('*').eq('id', account_id).single();
+    const { data: account } = await supabaseAdmin.from('email_accounts').select('*').eq('id', account_id).single();
     if(!account) return res.status(404).json({ error: 'Account not found' });
     account.app_password = decryptPassword(account.app_password);
     await sendEmail(account, { to, subject, body, replyTo });
@@ -793,7 +797,8 @@ router.post('/email/send', authenticate, async (req, res) => {
 // DELETE /api/email/account/:id
 router.delete('/email/account/:id', authenticate, async (req, res) => {
   try {
-    await supabase.from('email_accounts').delete().eq('id', req.params.id);
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    await supabaseAdmin.from('email_accounts').delete().eq('id', req.params.id);
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -801,7 +806,8 @@ router.delete('/email/account/:id', authenticate, async (req, res) => {
 // GET /api/email/body/:accountId/:uid
 router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
   try {
-    const { data: account } = await supabase.from('email_accounts').select('*').eq('id', req.params.accountId).single();
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    const { data: account } = await supabaseAdmin.from('email_accounts').select('*').eq('id', req.params.accountId).single();
     if(!account) return res.status(404).json({ error: 'Account not found' });
     account.app_password = decryptPassword(account.app_password);
     const Imap = require('node-imap');
