@@ -6,6 +6,66 @@ Each entry should include: date, symptom, root cause, fix, and the general lesso
 
 ---
 
+## 2026-05-17 — Supabase auth completely broken at launch
+
+**Symptom:** Signup/login failed outright when the platform was first being wired up.
+
+**Root cause:** A typo in the Supabase project URL (missing a `j` in `sfpfjjdtczvuxyhjievt`), combined with an empty `SUPABASE_ANON` key. A separate, unrelated infinite loop bug in the frontend's `showPricing()` function compounded the confusion.
+
+**Fix:** Corrected the project URL and populated the anon key. Fixed the infinite loop separately.
+
+**General lesson:** When auth fails completely (not partially), check the most basic configuration values character-by-character before assuming the logic is wrong — a single missing letter in a project ref is easy to miss and impossible to catch by reading code logic alone.
+
+---
+
+## 2026-05-17 — CORS errors blocking all frontend-backend requests
+
+**Symptom:** All API calls from the frontend failed with CORS errors.
+
+**Root cause:** The backend's CORS config used a static `origin: FRONTEND_URL` value that didn't reliably match the actual deployed frontend origin (especially across Vercel preview URLs).
+
+**Fix:** Replaced with `origin: function(origin, callback) { callback(null, true); }` — i.e. permissive CORS, reflecting any origin back. Acceptable here since the API requires its own auth token regardless of origin.
+
+**General lesson:** For APIs that already enforce auth on every route, a static CORS allowlist often causes more outages than it prevents — permissive CORS plus real auth is usually safer in practice for a single-frontend SaaS like this.
+
+---
+
+## 2026-05-17 — Backend wouldn't start on Render (multiple stacked causes)
+
+**Symptom:** Backend deploy failed/crashed on startup, sequentially, across several deploys.
+
+**Root cause (stacked, fixed one at a time):** Missing service files (`services/image.js`, `services/router.js`) not committed to git; missing npm packages (`openai`, `@anthropic-ai/sdk`) not in `package.json`; a stale build cache on Render serving an old broken bundle even after fixes were pushed.
+
+**Fix:** Committed the missing files, added the missing dependencies, and used Render's "Clear build cache & deploy" option to force a genuinely fresh build.
+
+**General lesson:** When a fix is pushed but the deployed behavior doesn't change, check whether the host is serving a cached build before re-debugging the code itself.
+
+---
+
+## 2026-06-12 — Sara voice agent call loop (n8n workflow)
+
+**Symptom:** Sara (the receptionist voice AI) was repeatedly re-calling the same leads instead of calling each one once.
+
+**Root cause:** The `Get New Leads` node in the n8n workflow had no `status` filter at all — it pulled every lead regardless of status on every poll, including old leads already marked `call_failed` or `calling`. The `Dedup Check` node only deduplicated *within* a single batch, with no logic to act on a duplicate once found.
+
+**Fix:** Added `status='new'` filter to `Get New Leads`. Added an `_dup_action` tag (`process`/`skip`) to `Dedup Check`, a new `Is Duplicate?` IF node, and a `Mark Duplicate Skipped` node that sets `status='duplicate_skipped'` so the same lead is never reprocessed.
+
+**General lesson:** Any polling workflow that repeatedly queries a table needs an explicit status filter — "give me new work" queries that don't filter out already-processed rows will eventually loop on stale data once enough rows accumulate.
+
+---
+
+## 2026-06-14 — Adam's call outcomes never updating lead status
+
+**Symptom:** Every call made by Adam (the enterprise voice agent) left the lead stuck on `call_failed`, regardless of how the call actually went.
+
+**Root cause:** Adam's Vapi assistant was configured with a Server URL pointing to `.../webhook/adam-call-result` — an endpoint that was never built. Calls completed correctly in Vapi, but the result webhook had nowhere real to land.
+
+**Fix (not yet applied — still open as of 2026-06-17):** Point Adam's Vapi Server URL to `.../webhook/sara-call-result` instead, the already-working Call Result Handler shared by Sara's pipeline.
+
+**General lesson:** When a voice/call agent's outcomes never update downstream state, check the *receiving* webhook URL configured in the voice platform itself, not just the n8n/backend side — a typo'd or never-built endpoint there fails silently from the app's perspective (the call still "completes" from the agent's point of view).
+
+---
+
 ## 2026-06-17 — Email Inbox: "No emails found" despite 5 configured accounts
 
 **Symptom:** Inbox page showed "No emails found" indefinitely. All 5 configured `email_accounts` rows had `last_synced: null`, suggesting they had never successfully synced.
