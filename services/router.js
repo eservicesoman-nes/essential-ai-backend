@@ -650,4 +650,53 @@ router.post('/clients/:clientId/create-login', authenticate, async (req, res) =>
   }
 });
 
+// ============================================================
+// 📍 GRANT IMAGE CREDITS TO A CLIENT (manual top-up, Client Manager)
+// ============================================================
+router.post('/clients/:clientId/grant-credits', authenticate, async (req, res) => {
+  try {
+    const { clientId } = req.params;
+    const { amount, note } = req.body;
+
+    const parsedAmount = parseInt(amount, 10);
+    if (!parsedAmount || parsedAmount <= 0) {
+      return res.status(400).json({ error: 'A positive credit amount is required' });
+    }
+
+    const { data: client, error: clientError } = await supabase
+      .from('clients')
+      .select('id, user_id, name')
+      .eq('id', clientId)
+      .single();
+
+    if (clientError || !client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    if (!client.user_id) {
+      return res.status(400).json({ error: 'This client has no linked login yet — create one first before granting credits' });
+    }
+
+    const credits = await getOrCreateImageCredits(client.user_id);
+    const newBalance = credits.balance + parsedAmount;
+
+    const { error: updateError } = await supabase
+      .from('image_credits')
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq('user_id', client.user_id);
+
+    if (updateError) {
+      return res.status(500).json({ error: `Failed to update balance: ${updateError.message}` });
+    }
+
+    await logImageCreditTransaction(client.user_id, 'purchase', parsedAmount, newBalance, null, note || `Manual grant via Client Manager (${parsedAmount} credits)`);
+
+    res.json({ success: true, newBalance, granted: parsedAmount });
+
+  } catch (error) {
+    console.error('Grant credits error:', error);
+    res.status(500).json({ error: 'Failed to grant credits' });
+  }
+});
+
 module.exports = router;
