@@ -122,6 +122,22 @@ Each entry should include: date, symptom, root cause, fix, and the general lesso
 
 ---
 
+---
+
+## 2026-06-19 — clientApi.js never mounted: Credentials, invites, and public registration all silently 404ing
+
+**Symptom:** Discovered while preparing platform documentation, not from a user-reported bug. Several frontend features called backend routes that returned 404, but this had never been noticed because the frontend showed success toasts regardless of the actual response.
+
+**Root cause:** `services/clientApi.js` contained a complete, correctly-written set of routes — client credentials get/save, team member listing, team invites, role changes, and critically `/api/register` (the public self-registration endpoint used by the Creativon landing page's signup flow) — but the file was never `require()`'d or mounted anywhere in `server.js`. Unlike the earlier orphaned top-level `router.js` (which was a leftover duplicate), this file was unique, complete, and necessary — it just never got wired in during initial development.
+
+**Impact:** Client Manager's Credentials tab had never actually saved anything to the database, despite showing "Credentials saved ✓" every time. Team invites never sent. Public self-registration via nes-ai.com/register.html was completely broken — anyone trying to sign up directly would have hit a silent failure.
+
+**Fix:** Added `require('./services/clientApi')(app)` to server.js after the main router mount. Since this file's routes had zero authentication (a real security gap, not just a missing-feature bug), `authenticate` was exported from `router.js` as an additive change (`module.exports.authenticate = authenticate`, alongside the existing `module.exports = router`, with no change to router's own behavior) and applied to every sensitive route in clientApi.js. `/api/register` was deliberately left public since it's the signup endpoint; confirmed via frontend grep that `/api/admin/partner-approve` is currently unused by the frontend (Partner Hub writes to Supabase directly), so protecting it is safe with no functional impact.
+
+**Verified:** Endpoint that previously returned 404 now returns 401 (auth required) — confirms the route exists and is properly protected. PM2 restart showed 0 unstable restarts, startup log confirmed "Client API routes mounted."
+
+**Lesson:** A file existing in the repo with correct, working-looking code is not proof it's actually running. Before documenting any feature as "working," verify the actual route responds (even just checking it returns something other than 404) rather than trusting that complete-looking code must be wired in. This is the second time an entire complete file has been found orphaned in this codebase (see the May email-routes incident) — worth doing a one-time audit of every file in services/ to confirm each one is actually required somewhere, rather than assuming.
+
 ## Template for new entries
 
 ```
