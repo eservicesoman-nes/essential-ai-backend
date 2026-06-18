@@ -155,7 +155,7 @@ async function callDeepSeek(messages, systemPrompt) {
       'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`
     },
     body: JSON.stringify({
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-flash',
       messages: deepseekMessages,
       temperature: 0.1,
       max_tokens: 4000
@@ -270,7 +270,7 @@ router.post('/chat', authenticate, async (req, res) => {
     let sources = [];
     let searchContext = '';
 
-    if (webSearch && ['chat', 'deepcore'].includes(mode)) {
+    if (webSearch && mode === 'chat') {
       const searchResult = await searchWeb(message);
       searchContext = searchResult.context;
       sources = searchResult.sources;
