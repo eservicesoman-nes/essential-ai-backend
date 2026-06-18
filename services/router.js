@@ -977,3 +977,4 @@ router.get('/clients/:clientId/payments', authenticate, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.authenticate = authenticate;
