@@ -316,7 +316,7 @@ router.post('/chat', authenticate, async (req, res) => {
       }
     }
 
-    await incrementUsage(req.user.id, 'chat');
+    await incrementUsage(req.user.id, mode === 'docs' ? 'docs' : 'chat');
 
     const duration = Date.now() - startTime;
     console.log(`Chat completed in ${duration}ms`);
