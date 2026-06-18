@@ -120,7 +120,7 @@ async function searchWeb(query) {
 // ============================================================
 async function callGemini(message, history, systemPrompt) {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-2.5-flash',
     systemInstruction: systemPrompt,
     generationConfig: {
       temperature: 0.1,
@@ -298,7 +298,7 @@ router.post('/chat', authenticate, async (req, res) => {
       try {
         console.log('🌊 Using Gemini 3 Flash Preview');
         const geminiModel = genAI.getGenerativeModel({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-2.5-flash',
           systemInstruction: systemPrompt,
           generationConfig: { temperature: 0.1, maxOutputTokens: 2048 }
         });
@@ -576,11 +576,11 @@ router.get('/usage', authenticate, async (req, res) => {
 router.get('/models', authenticate, async (req, res) => {
   res.json({
     models: [
-      { id: 'gemini-3-flash-preview', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
+      { id: 'gemini-2.5-flash', name: 'NES AI Fast', provider: 'NES AI', context: '1M', speed: 'Fastest' },
       { id: 'deepseek', name: 'NES AI Core', provider: 'NES AI', context: '128K', speed: 'Normal' },
       { id: 'claude', name: 'NES AI Pro', provider: 'NES AI', context: '200K', speed: 'Normal' }
     ],
-    default: 'gemini-3-flash-preview'
+    default: 'gemini-2.5-flash'
   });
 });
 
