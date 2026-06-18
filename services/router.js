@@ -296,7 +296,7 @@ router.post('/chat', authenticate, async (req, res) => {
       }
     } else {
       try {
-        console.log('🌊 Using Gemini 3 Flash Preview');
+        console.log('🌊 Using Gemini 2.5 Flash');
         const geminiModel = genAI.getGenerativeModel({
           model: 'gemini-2.5-flash',
           systemInstruction: systemPrompt,
