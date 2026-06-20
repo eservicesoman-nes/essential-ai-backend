@@ -23,7 +23,7 @@ module.exports = function(app) {
     try {
       const { name, email, website, industry, region, country, language, lead_email, primary_color, logo_url, plan, status } = req.body;
       if (!name) return res.status(400).json({ error: 'Name is required' });
-      const { data, error } = await sb.from('clients').insert([{ name, email, website, industry, region, country, language, lead_email, primary_color: primary_color||'#1a56db', logo_url, plan: plan||'starter', status: status||'active' }]).select().single();
+      const { data, error } = await sb.from('clients').insert([{ name, email, website, industry, region, country, language, lead_email, primary_color: primary_color||'#1a56db', logo_url, plan: plan||'starter', status: status||'active', trial_start: new Date().toISOString(), trial_duration_days: 7 }]).select().single();
       if (error) throw error;
       res.json({ success: true, client: data });
     } catch (e) { res.status(500).json({ error: e.message }); }
