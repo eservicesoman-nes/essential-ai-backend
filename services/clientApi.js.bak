@@ -1,0 +1,82 @@
+const { supabase: sb, getClientCredentials, saveClientCredentials } = require('./credentials');
+
+module.exports = function(app) {
+
+  app.get('/api/clients', async (req, res) => {
+    try {
+      const { data, error } = await sb.from('clients').select('id,name,industry,region,country,language,status,plan,primary_color,logo_url,lead_email,modules,created_at').order('name');
+      if (error) throw error;
+      res.json({ success: true, clients: data });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/client/:id', async (req, res) => {
+    try {
+      const { data, error } = await sb.from('clients').select('id,name,industry,region,country,language,status,plan,primary_color,logo_url,lead_email,modules,created_at').eq('id', req.params.id).single();
+      if (error) throw error;
+      res.json({ success: true, client: data });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/client', async (req, res) => {
+    try {
+      const { name, email, website, industry, region, country, language, lead_email, primary_color, logo_url, plan, status } = req.body;
+      if (!name) return res.status(400).json({ error: 'Name is required' });
+      const { data, error } = await sb.from('clients').insert([{ name, email, website, industry, region, country, language, lead_email, primary_color: primary_color||'#1a56db', logo_url, plan: plan||'starter', status: status||'active' }]).select().single();
+      if (error) throw error;
+      res.json({ success: true, client: data });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/client/:id', async (req, res) => {
+    try {
+      const allowed = ['name','email','website','industry','region','country','language','lead_email','primary_color','logo_url','plan','status'];
+      const update = {};
+      allowed.forEach(f => { if (req.body[f] !== undefined) update[f] = req.body[f]; });
+      const { error } = await sb.from('clients').update(update).eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.delete('/api/client/:id', async (req, res) => {
+    try {
+      const { error } = await sb.from('clients').delete().eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/client/:id/modules', async (req, res) => {
+    try {
+      const { data, error } = await sb.from('clients').select('modules').eq('id', req.params.id).single();
+      if (error) throw error;
+      res.json({ success: true, modules: data.modules });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/client/:id/modules', async (req, res) => {
+    try {
+      const { error } = await sb.from('clients').update({ modules: req.body.modules }).eq('id', req.params.id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/client/:id/feed', async (req, res) => {
+    try {
+      const { data, error } = await sb.from('ceo_feed').select('*').order('created_at', { ascending: false }).limit(20);
+      if (error) throw error;
+      res.json({ success: true, feed: data });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/client/:id/leads', async (req, res) => {
+    try {
+      const { data, error } = await sb.from('leads').select('*').eq('client_id', req.params.id).order('created_at', { ascending: false }).limit(100);
+      if (error) throw error;
+      res.json({ success: true, leads: data });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+};
