@@ -340,6 +340,33 @@ router.post('/chat', authenticate, async (req, res) => {
 });
 
 // ============================================================
+// 📄 DOCS CHAT ENDPOINT (returns plain JSON, not SSE)
+// ============================================================
+router.post('/chat/docs', authenticate, async (req, res) => {
+  try {
+    const { message, history = [] } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message is required' });
+    const today = new Date().toISOString().split('T')[0];
+    const { data: usage } = await supabase.from('usage').select('docs_used').eq('user_id', req.user.id).eq('date', today).single();
+    const docsUsed = usage?.docs_used || 0;
+    if (docsUsed >= 5) return res.status(429).json({ error: 'Daily document limit reached' });
+    const messages = [...history.map(h => ({ role: h.role, content: h.content })), { role: 'user', content: message }];
+    const systemPrompt = getSystemPrompt('docs', '');
+    let reply = '';
+    try { reply = await callDeepSeek(messages, systemPrompt); }
+    catch (e) {
+      try { reply = await callGemini(message, history, systemPrompt); }
+      catch (e2) { reply = await callClaude(messages, systemPrompt); }
+    }
+    await incrementUsage(req.user.id, 'docs');
+    res.json({ reply });
+  } catch (error) {
+    console.error('Docs chat error:', error);
+    res.status(500).json({ error: 'Failed to process document' });
+  }
+});
+
+// ============================================================
 // 🪙 IMAGE CREDITS HELPERS
 // ============================================================
 async function getOrCreateImageCredits(userId) {
