@@ -840,6 +840,17 @@ router.delete('/email/account/:id', authenticate, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/email/account/:id/reauth
+router.post('/email/account/:id/reauth', authenticate, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured' });
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required' });
+    const encrypted = encryptPassword(password);
+    await supabaseAdmin.from('email_accounts').update({ app_password: encrypted }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 // GET /api/email/body/:accountId/:uid
 router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
   try {
