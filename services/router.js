@@ -1049,5 +1049,51 @@ router.get('/admin/ping/backblaze', authenticate, async (req, res) => {
   } catch(e) { res.json({ online: false, ms: 0 }); }
 });
 
+// GET /api/admin/vps-stats
+router.get('/admin/vps-stats', authenticate, async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    exec("df -h / | tail -1 && free -m | grep Mem && uptime", (err, stdout) => {
+      res.json({ stats: stdout, error: err ? err.message : null });
+    });
+  } catch(e) { res.json({ stats: null, error: e.message }); }
+});
+
+// GET /api/admin/backup-status
+router.get('/admin/backup-status', authenticate, async (req, res) => {
+  try {
+    const response = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(process.env.B2_KEY_ID + ':' + process.env.B2_APP_KEY).toString('base64') }
+    });
+    if (!response.ok) return res.json({ backups: [], status: 'error' });
+    const auth = await response.json();
+    res.json({ status: 'ok', bucket: process.env.B2_BUCKET_NAME, apiUrl: auth.apiUrl });
+  } catch(e) { res.json({ backups: [], status: 'error', error: e.message }); }
+});
+
+// GET /api/admin/ping/github-proxy
+router.get('/admin/ping/github-proxy', authenticate, async (req, res) => {
+  try {
+    const response = await fetch('https://api.github.com/user', {
+      headers: { 'Authorization': 'token ' + process.env.GITHUB_PAT, 'User-Agent': 'NES-AI' }
+    });
+    res.json({ online: response.ok, ms: 0 });
+  } catch(e) { res.json({ online: false, ms: 0 }); }
+});
+
+// POST /api/admin/notify
+router.post('/admin/notify', authenticate, async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'Message required' });
+    await fetch('https://api.telegram.org/bot' + process.env.TELEGRAM_BOT_TOKEN + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: process.env.TELEGRAM_CHAT_ID, text: message, parse_mode: 'Markdown' })
+    });
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
 module.exports.authenticate = authenticate;
