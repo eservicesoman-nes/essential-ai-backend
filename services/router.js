@@ -803,16 +803,16 @@ router.get('/email/inbox/:clientId', authenticate, async (req, res) => {
     if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
     const { data: accounts } = await supabaseAdmin.from('email_accounts').select('*').eq('client_id', req.params.clientId).eq('is_active', true);
     if(!accounts || accounts.length === 0) return res.json({ emails: [] });
-    const allEmails = [];
-    for(const account of accounts) {
+    const results = await Promise.all(accounts.map(async account => {
       try {
         account.app_password = decryptPassword(account.app_password);
         const emails = await fetchEmails(account, 20);
         emails.forEach(e => { e.account_id = account.id; e.account_email = account.email_address; e.account_label = account.label; });
-        allEmails.push(...emails);
         await supabaseAdmin.from('email_accounts').update({ last_synced: new Date().toISOString() }).eq('id', account.id);
-      } catch(e) { console.error('Fetch error for', account.email_address, e.message); }
-    }
+        return emails;
+      } catch(e) { console.error('Fetch error for', account.email_address, e.message); return []; }
+    }));
+    const allEmails = results.flat();
     allEmails.sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
     res.json({ emails: allEmails.slice(0, 50) });
   } catch(e) { res.status(500).json({ error: e.message }); }
