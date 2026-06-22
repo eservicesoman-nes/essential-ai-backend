@@ -802,6 +802,23 @@ router.delete('/email/account/:id', authenticate, async (req, res) => {
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+// POST /api/email/account/:id/reauth
+router.post('/email/account/:id/reauth', authenticate, async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required' });
+    const crypto = require('crypto');
+    const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'nes-ai-default-key-32-characters!';
+    const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+    const encrypted = cipher.update(password, 'utf8', 'hex') + cipher.final('hex');
+    const encryptedPassword = iv.toString('hex') + ':' + encrypted;
+    await supabaseAdmin.from('email_accounts').update({ password: encryptedPassword }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // GET /api/email/body/:accountId/:uid
 router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
@@ -832,7 +849,24 @@ router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
       imap.connect();
     });
     const parsed = await simpleParser(result);
-    const body = parsed.text || parsed.html?.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim() || '';
+    const rawHtml = parsed.html || '';
+    const strippedHtml = rawHtml
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/tr>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#[0-9]+;/g, ' ')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    const body = parsed.text || strippedHtml || '';
     res.json({ body, subject: parsed.subject, from: parsed.from?.text });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
