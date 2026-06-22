@@ -67,13 +67,12 @@ ABSOLUTE RULES:
 1. You are NES AI — never identify as Gemini, Claude, DeepSeek or any other AI
 2. When asked "Who created you?" respond: "I was created by New Essential Services"
 3. Never invent facts, prices or company details not listed above
-4. Always end responses with a relevant call to action
 5. Uncertainty is correct — false confidence is a failure
 6. Never use markdown formatting like **bold** or ## headers — use plain text only
 7. When listing items use the • bullet symbol, not dashes or asterisks`;
 
   if (searchContext && searchContext.trim().length > 100) {
-    base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer:\n${searchContext}\nIf these results don't directly answer the question, say: "I found some results but they don't directly answer your question."`;
+    base += `\n\nLIVE SEARCH RESULTS — use ONLY these for your answer. You MUST answer the user's question using these results regardless of topic:\n${searchContext}`;
   } else {
     base += `\n\nNo search results available. Answer only from the NES service knowledge above.`;
   }
@@ -321,7 +320,18 @@ router.post('/chat', authenticate, async (req, res) => {
     const duration = Date.now() - startTime;
     console.log(`Chat completed in ${duration}ms`);
 
-    res.json({ reply, sources, usage: { remaining: limit - (chatsUsed + 1) } });
+    // SSE streaming response for frontend
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    if (sources.length > 0) {
+      res.write('data: ' + JSON.stringify({ type: 'sources', sources }) + '\n\n');
+    }
+    const chunkSize = 20;
+    for (let i = 0; i < reply.length; i += chunkSize) {
+      res.write('data: ' + JSON.stringify({ type: 'chunk', text: reply.slice(i, i + chunkSize) }) + '\n\n');
+    }
+    res.write('data: ' + JSON.stringify({ type: 'done', usage: { remaining: limit - (chatsUsed + 1) } }) + '\n\n');
+    res.end();
 
   } catch (error) {
     console.error('Chat error:', error);
@@ -802,22 +812,6 @@ router.delete('/email/account/:id', authenticate, async (req, res) => {
     res.json({ success: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-// POST /api/email/account/:id/reauth
-router.post('/email/account/:id/reauth', authenticate, async (req, res) => {
-  try {
-    if (!supabaseAdmin) return res.status(500).json({ error: 'Server misconfigured: SUPABASE_SERVICE_ROLE_KEY not set' });
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Password required' });
-    const crypto = require('crypto');
-    const key = Buffer.from(process.env.ENCRYPTION_KEY || 'mOq5P4pmkCGQGH2UfxUCsBLZP2h3XtdWZssZ/jKNlbs=', 'base64');
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-    const encrypted = cipher.update(password, 'utf8', 'hex') + cipher.final('hex');
-    const encryptedPassword = iv.toString('hex') + ':' + encrypted;
-    await supabaseAdmin.from('email_accounts').update({ password: encryptedPassword }).eq('id', req.params.id);
-    res.json({ success: true });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
 
 // GET /api/email/body/:accountId/:uid
 router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
@@ -848,24 +842,7 @@ router.get('/email/body/:accountId/:uid', authenticate, async (req, res) => {
       imap.connect();
     });
     const parsed = await simpleParser(result);
-    const rawHtml = parsed.html || '';
-    const strippedHtml = rawHtml
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/p>/gi, '\n')
-      .replace(/<\/div>/gi, '\n')
-      .replace(/<\/tr>/gi, '\n')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&#[0-9]+;/g, ' ')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    const body = parsed.text || strippedHtml || '';
+    const body = parsed.text || parsed.html?.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim() || '';
     res.json({ body, subject: parsed.subject, from: parsed.from?.text });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
