@@ -809,8 +809,7 @@ router.post('/email/account/:id/reauth', authenticate, async (req, res) => {
     const { password } = req.body;
     if (!password) return res.status(400).json({ error: 'Password required' });
     const crypto = require('crypto');
-    const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'nes-ai-default-key-32-characters!';
-    const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+    const key = Buffer.from(process.env.ENCRYPTION_KEY || 'mOq5P4pmkCGQGH2UfxUCsBLZP2h3XtdWZssZ/jKNlbs=', 'base64');
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
     const encrypted = cipher.update(password, 'utf8', 'hex') + cipher.final('hex');
