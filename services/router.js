@@ -1024,5 +1024,30 @@ router.get('/clients/:clientId/payments', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/admin/ping/pm2
+router.get('/admin/ping/pm2', authenticate, async (req, res) => {
+  try {
+    const { exec } = require('child_process');
+    exec('pm2 jlist', (err, stdout) => {
+      if (err) return res.json({ online: false, processes: [] });
+      try {
+        const list = JSON.parse(stdout);
+        const processes = list.map(p => ({ name: p.name, status: p.pm2_env.status, restarts: p.pm2_env.restart_time }));
+        res.json({ online: true, processes });
+      } catch(e) { res.json({ online: false, processes: [] }); }
+    });
+  } catch(e) { res.json({ online: false, processes: [] }); }
+});
+
+// GET /api/admin/ping/backblaze
+router.get('/admin/ping/backblaze', authenticate, async (req, res) => {
+  try {
+    const response = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(process.env.B2_KEY_ID + ':' + process.env.B2_APP_KEY).toString('base64') }
+    });
+    res.json({ online: response.ok, ms: 0 });
+  } catch(e) { res.json({ online: false, ms: 0 }); }
+});
+
 module.exports = router;
 module.exports.authenticate = authenticate;
